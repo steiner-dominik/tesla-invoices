@@ -84,6 +84,37 @@ class TestDetermineBestToken:
         assert TokenManager.jwt_decode(tm.access_token).get("iat") == 200
         assert config.access_token_path.read_text() == tm.access_token
 
+    def test_no_tokens_at_all_raises_on_load(self, tmp_path):
+        tm = TokenManager(make_config(tmp_path))
+        with pytest.raises(TeslaAuthError):
+            tm.load_tokens()
+
+    def test_access_token_alone_works_until_expiry(self, tmp_path, monkeypatch):
+        # Standalone users may prefer a short-lived access token over handing
+        # the app a long-lived refresh token; it must work until it expires.
+        config = make_config(tmp_path, env_access_token=make_jwt({"iat": 100, "exp": 99999999999}))
+        tm = TokenManager(config)
+        tm.load_tokens()
+
+        def fail(_payload):
+            raise AssertionError("the token endpoint must not be contacted without a refresh token")
+
+        monkeypatch.setattr(tm, "_auth_post", fail)
+        tm.refresh_access_token_if_needed()  # must not raise or refresh
+        assert tm.refresh_token == ""
+
+    def test_expired_access_token_without_refresh_token_raises(self, tmp_path):
+        config = make_config(tmp_path, env_access_token=make_jwt({"iat": 100, "exp": 1000}))
+        tm = TokenManager(config)
+        tm.load_tokens()
+        with pytest.raises(TeslaAuthError):
+            tm.refresh_access_token_if_needed()
+
+    def test_refresh_without_refresh_token_raises(self, tmp_path):
+        tm = TokenManager(make_config(tmp_path))
+        with pytest.raises(TeslaAuthError):
+            tm.refresh_access_token()
+
     def test_rotated_refresh_token_is_persisted(self, tmp_path, monkeypatch):
         config = make_config(tmp_path, env_refresh_token=make_jwt({"iat": 100}))
         tm = TokenManager(config)

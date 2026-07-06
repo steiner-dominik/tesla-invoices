@@ -1,4 +1,35 @@
 <!-- https://developers.home-assistant.io/docs/apps/presentation#keeping-a-changelog -->
+## 2026.07.02
+
+- **Home Assistant time zone support**: the app now automatically adopts the
+  time zone configured in Home Assistant (read from the Supervisor at
+  startup), so log timestamps and the current/previous-month sync window
+  match your local time instead of UTC. Standalone deployments can set the
+  `TZ` environment variable (which always takes precedence); `tzdata` is now
+  included in the image.
+- **Clearer logs, no sensitive data**: log messages have been rewritten in
+  plain language ("Starting invoice sync…", "Invoice sync finished", …).
+  Email addresses, full VINs and raw Tesla API responses are no longer
+  written to the log at any level, so logs can be shared in bug reports
+  safely. Tokens were never logged.
+- **`access_token` option removed from the Home Assistant app**: it was never
+  needed — the refresh token is sufficient, and access tokens are obtained,
+  rotated and persisted automatically. If the app reports an invalid
+  `access_token` option after updating, remove that line via
+  *Configuration → three-dot menu → Edit in YAML*.
+- **Access-token-only mode for the standalone app**: users who prefer not to
+  store a long-lived credential can now supply just `ACCESS_TOKEN` (no
+  refresh token). Syncing works until the token expires and then stops with a
+  clear error; renewal stays automatic when a refresh token is configured.
+- **Working token generator links**: the documentation now points to
+  [tesla_auth](https://github.com/adriankumpf/tesla_auth) (Windows/macOS/
+  Linux) and [Auth app for Tesla](https://apps.apple.com/us/app/auth-app-for-tesla/id1552058613)
+  (iOS); the previously listed tools are outdated or gone.
+- Clarified in the README, docs and dashboard footer that this project is
+  **not affiliated with Tesla, Inc.**
+- Docker image: added a container `HEALTHCHECK` for standalone deployments;
+  the README now documents all API endpoints.
+
 ## 2026.07.01
 
 First public release. Tesla Invoices started as an interactive CLI script,

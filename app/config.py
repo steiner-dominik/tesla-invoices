@@ -72,7 +72,11 @@ class Config:
             polling_interval=_to_int(options.get("polling_interval", 15), "polling_interval"),
             default_currency=(options.get("default_currency") or "").strip().upper(),
             env_refresh_token=options.get("refresh_token", ""),
-            env_access_token=options.get("access_token", ""),
+            # The HA app intentionally has no access_token option: the refresh
+            # token is all that's needed (access tokens are obtained/rotated
+            # automatically and persisted in /data). Only the standalone
+            # deployment supports supplying one via ACCESS_TOKEN.
+            env_access_token="",
             email_from=email_opts.get("from") or "",
             email_to=email_opts.get("to") or "",
             email_server=email_opts.get("mailserver") or "",

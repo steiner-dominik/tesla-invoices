@@ -6,6 +6,10 @@
 
 **Automatically download all your Tesla charging & subscription invoices — and actually understand them.**
 
+> ⚠️ **This is an independent community project. It is not affiliated with, endorsed by, or
+> supported by Tesla, Inc. in any way.** "Tesla" is used here solely to describe which
+> vehicles and accounts the software works with.
+
 Tesla Invoices fetches every Supercharging and subscription invoice from your Tesla account,
 stores the PDFs locally, and serves a clean analytics dashboard: monthly energy and cost
 charts, price per kWh, multi-vehicle support, CSV export for your expense report, and
@@ -37,13 +41,14 @@ You need a Tesla **refresh token**, generated with one of these apps:
 
 | Platform | App |
 | -------- | --- |
-| Android | [Tesla Tokens](https://play.google.com/store/apps/details?id=net.leveugle.teslatokens) |
-| iOS | [Auth App for Tesla](https://apps.apple.com/us/app/auth-app-for-tesla/id1552058613) |
-| Browser | [Chromium Tesla Token Generator](https://github.com/DoctorMcKay/chromium-tesla-token-generator) |
-| TeslaFi | [Tesla v3 API Tokens](https://support.teslafi.com/en/communities/1/topics/16979-tesla-v3-api-tokens) |
+| Windows / macOS / Linux | [tesla_auth](https://github.com/adriankumpf/tesla_auth) (recommended) |
+| iOS | [Auth app for Tesla](https://apps.apple.com/us/app/auth-app-for-tesla/id1552058613) |
 
 > 🔒 **Treat tokens like passwords.** They grant full access to your Tesla account.
 > Never commit them to version control.
+>
+> Prefer not to hand the app a long-lived credential? Supply only a (short-lived)
+> **access token** instead — see the Configuration section below.
 
 ```bash
 git clone https://github.com/steiner-dominik/tesla-invoices.git
@@ -94,7 +99,8 @@ All settings are environment variables (see [docker.env.example](docker.env.exam
 | Variable | Default | Description |
 | -------- | ------- | ----------- |
 | `REFRESH_TOKEN` | – | Tesla refresh token (alternatively mount `secrets/refresh_token.txt`) |
-| `ACCESS_TOKEN` | – | Optional; obtained automatically from the refresh token if omitted |
+| `ACCESS_TOKEN` | – | Optional; obtained automatically from the refresh token if omitted (see note below) |
+| `TZ` | UTC | Time zone for timestamps and month boundaries, e.g. `Europe/Vienna` |
 | `POLLING_INTERVAL` | `15` | Minutes between checks for new invoices |
 | `ENABLE_SUBSCRIPTION_INVOICE` | `True` | Also download subscription (e.g. Premium Connectivity) invoices |
 | `DEFAULT_CURRENCY` | auto | Preferred dashboard currency (e.g. `EUR`); auto-detected when empty |
@@ -105,6 +111,14 @@ All settings are environment variables (see [docker.env.example](docker.env.exam
 | `PORT` | `9000` | Web UI port |
 | `INVOICE_PATH` | `/opt/tesla-invoices/invoices` | Where PDFs and metadata are stored |
 | `ACCESS_TOKEN_PATH` / `REFRESH_TOKEN_PATH` | `/opt/tesla-invoices/secrets/…` | Token file locations |
+
+**Access token only:** if you prefer not to give the app a long-lived,
+account-wide credential, you can supply just an `ACCESS_TOKEN` and leave
+`REFRESH_TOKEN` empty. The app then works until that token expires (typically
+a few hours) and stops syncing with a clear error until you provide a fresh
+one — with a refresh token this renewal happens automatically. The Home
+Assistant app intentionally has no access-token option; it always uses the
+refresh-token flow.
 
 **Gmail tip:** use an [App Password](https://myaccount.google.com/apppasswords)
 (requires 2-step verification) — your normal account password will not work.
@@ -120,7 +134,10 @@ The dashboard is a thin client over a small REST API you can use directly:
 | `GET /api/export.csv` | CSV export of all invoices |
 | `GET /api/download/{filename}?inline=true` | Download / view an invoice PDF |
 | `POST /api/email/{filename}?to=…` | Email one invoice to any recipient |
-| `GET /health` | Health check (used by the HA watchdog) |
+| `GET /api/files` | List stored files with previews (Files tab) |
+| `DELETE /api/files/{filename}` | Delete one stored PDF / metadata file |
+| `POST /api/files/rescan` | Re-extract cost/currency from stored PDFs |
+| `GET /health` | Health check (used by the HA watchdog and Docker) |
 
 ## 🛠️ Development
 
@@ -160,5 +177,10 @@ Sauerwein-Schlosser ([aSauerwein/tesla-invoices](https://github.com/aSauerwein/t
 
 ## ⚖️ Disclaimer
 
+**This project is not affiliated with, endorsed by, sponsored by, or in any
+way officially connected to Tesla, Inc.** or any of its subsidiaries. All
+product names, trademarks and registered trademarks are property of their
+respective owners.
+
 This software is provided “as is” and without any warranty. Use at your own
-risk. It is not affiliated with or endorsed by Tesla, Inc.
+risk.

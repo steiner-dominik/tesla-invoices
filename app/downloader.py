@@ -77,33 +77,37 @@ class InvoiceDownloader:
     def download_invoices(self, months: list[datetime] | None = None) -> None:
         """Download invoices for the given months, or all invoices if ``months`` is None."""
         month_set = self._month_set(months)
-        date_str = "all" if month_set is None else ", ".join(sorted(f"{y}-{m:02d}" for y, m in month_set))
-        logger.info(f"Desired invoice month(s): {date_str}")
+        date_str = (
+            "all months" if month_set is None else ", ".join(sorted(f"{y}-{m:02d}" for y, m in month_set))
+        )
+        logger.info(f"Starting invoice sync ({date_str})")
 
         self.config.invoice_path.mkdir(parents=True, exist_ok=True)
         vehicles = self.client.get_vehicles()
 
         failures = 0
         for vin, vehicle in vehicles.items():
-            display_name = vehicle.get("display_name", "")
-            name_suffix = f"- {display_name}" if display_name else ""
-            logger.info(f"Processing vehicle {vin} {name_suffix}...")
+            display_name = vehicle.get("display_name") or ""
+            # Logs may be pasted into public bug reports; never log the full
+            # VIN (or other personal data) at normal log levels.
+            label = display_name or f"VIN ending in {vin[-4:]}"
+            logger.info(f"Checking vehicle '{label}' for new charging invoices")
 
-            # Charging Invoices
             charging_data = self.client.get_charging_history(vin)
             charging_sessions = self._extract_charging_sessions(charging_data)
             failures += self._save_charging_invoices(charging_sessions, month_set, vin, display_name)
 
-            # Subscription Invoices
             if self.config.enable_subscription_invoice:
-                logger.info("Subscription Invoice Enabled -> starting to download subscription invoices")
+                logger.info(f"Checking vehicle '{label}' for new subscription invoices")
                 sub_data = self.client.get_subscription_invoices(vin)
                 failures += self._save_subscription_invoices(sub_data.get("data", []), month_set, vin, display_name)
 
         if failures:
-            logger.warning(f"DONE downloading invoices, but {failures} invoice(s) failed and will be retried")
+            logger.warning(
+                f"Invoice sync finished, but {failures} download(s) failed; they will be retried on the next sync"
+            )
         else:
-            logger.info("DONE downloading invoices")
+            logger.info("Invoice sync finished")
 
     @staticmethod
     def _extract_charging_sessions(charging_payload: Any) -> list[dict]:
@@ -196,10 +200,12 @@ class InvoiceDownloader:
             logger.debug(f"Invoice {filename} already saved")
             return
 
-        logger.info(f"Downloading {filename}")
+        # Log the Tesla-side file name only: the local name contains the VIN,
+        # and logs may be pasted into public bug reports.
+        logger.info(f"Downloading new charging invoice {filename}")
         content = self.client.get_charging_invoice(invoice_id, vin)
         local_pdf_path.write_bytes(content)
-        logger.info(f"File '{local_pdf_path}' saved.")
+        logger.debug(f"Saved '{local_pdf_path}'")
 
     @staticmethod
     def _charging_fee_metadata(session: dict) -> dict:
@@ -376,10 +382,10 @@ class InvoiceDownloader:
             currency = existing_meta.get("currency") or ""
 
         if not local_pdf_path.exists():
-            logger.info(f"Downloading {invoice['InvoiceFileName']}")
+            logger.info(f"Downloading new subscription invoice {invoice['InvoiceFileName']}")
             content = self.client.get_subscription_invoice(invoice["InvoiceId"], vin)
             local_pdf_path.write_bytes(content)
-            logger.info(f"File '{local_pdf_path}' saved.")
+            logger.debug(f"Saved '{local_pdf_path}'")
 
         if not have_cost and local_pdf_path.exists():
             logger.debug(f"Parsing PDF {local_pdf_path.name} to extract cost")

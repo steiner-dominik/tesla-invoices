@@ -198,6 +198,8 @@ class TokenManager:
         self.config = config
         self.access_token: str = ""
         self.refresh_token: str = ""
+        # Access-token-only mode warns once, not on every request of a sync.
+        self._expiry_warned = False
 
     @staticmethod
     def jwt_decode(token: str) -> dict[str, Any]:
@@ -249,10 +251,17 @@ class TokenManager:
         return best_token
 
     def load_tokens(self) -> None:
-        # Only the refresh token is strictly required: a missing/expired
-        # access token is obtained via the refresh flow on the next request.
+        # A refresh token is recommended (access tokens are then obtained and
+        # rotated automatically), but an access token alone also works for
+        # standalone users who prefer a short-lived credential — until it
+        # expires. At least one of the two must be present.
         self.access_token = self._determine_best_token("access", required=False)
-        self.refresh_token = self._determine_best_token("refresh")
+        self.refresh_token = self._determine_best_token("refresh", required=False)
+        if not self.access_token and not self.refresh_token:
+            raise TeslaAuthError(
+                "No Tesla token configured. Provide a refresh token (recommended), "
+                "or an access token if you prefer a short-lived credential."
+            )
 
     def refresh_access_token_if_needed(self) -> None:
         # In HA mode the user can paste new tokens into the app options at
@@ -263,9 +272,25 @@ class TokenManager:
         # A missing/undecodable access token simply counts as expired (exp 0)
         # and is bootstrapped from the refresh token below.
         jwt_json = self.jwt_decode(self.access_token)
+        remaining = jwt_json.get("exp", 0) - time.time()
 
-        if jwt_json.get("exp", 0) - time.time() < TOKEN_EXPIRATION_THRESHOLD:
+        if remaining >= TOKEN_EXPIRATION_THRESHOLD:
+            return
+
+        if self.refresh_token:
             self.refresh_access_token()
+        elif remaining <= 0:
+            raise TeslaAuthError(
+                "The Tesla access token has expired and no refresh token is configured. "
+                "Provide a fresh access token, or configure a refresh token so tokens can be renewed automatically."
+            )
+        elif not self._expiry_warned:
+            # Access-token-only mode: keep using the token until it really expires.
+            self._expiry_warned = True
+            logger.warning(
+                f"The Tesla access token expires in about {int(remaining / 60)} minutes and no refresh token "
+                "is configured — syncing will stop working then until a new token is provided"
+            )
 
     @staticmethod
     def _auth_post(payload: dict[str, str]) -> dict[str, Any]:
@@ -286,7 +311,11 @@ class TokenManager:
         return result.json()
 
     def refresh_access_token(self) -> None:
-        logger.info("Refreshing token")
+        if not self.refresh_token:
+            raise TeslaAuthError(
+                "Cannot renew the Tesla access token because no refresh token is configured"
+            )
+        logger.info("Requesting a new Tesla access token")
         payload = {
             "grant_type": "refresh_token",
             "client_id": "ownerapi",
@@ -296,7 +325,7 @@ class TokenManager:
         try:
             data = self._auth_post(payload)
         except curl_requests.exceptions.RequestException as e:
-            raise TeslaAuthError(f"Failed to refresh token: {e}") from e
+            raise TeslaAuthError(f"Renewing the Tesla access token failed: {e}") from e
 
         self.access_token = data["access_token"]
         self._persist_token(self.config.access_token_path, self.access_token)
@@ -306,8 +335,8 @@ class TokenManager:
         if new_refresh_token and new_refresh_token != self.refresh_token:
             self.refresh_token = new_refresh_token
             self._persist_token(self.config.refresh_token_path, new_refresh_token)
-            logger.info("Persisted rotated refresh token")
-        logger.info("Successfully refreshed token")
+            logger.info("Tesla issued a new refresh token; stored it for future syncs")
+        logger.info("Tesla access token renewed")
 
 
 class TeslaAPIClient:
@@ -360,7 +389,9 @@ class TeslaAPIClient:
                 # TCP reset (104) — both idle pooled sockets and, during bot
                 # -mitigation episodes, fresh ones. Drop the connection pool
                 # so the retry starts from a clean handshake.
-                logger.warning(f"Transient connection error ({e}), attempt {attempt + 1} of {MAX_RETRIES}")
+                logger.warning(
+                    f"Connection to Tesla was interrupted, retrying (attempt {attempt + 1} of {MAX_RETRIES}): {e}"
+                )
                 self.sess.close()
                 time.sleep(attempt * 3 + 1)
             except requests.exceptions.HTTPError as e:
@@ -370,7 +401,10 @@ class TeslaAPIClient:
                 # recovers instead of trusting the token until it expires.
                 if status in (401, 403) and not auth_retried:
                     auth_retried = True
-                    logger.warning(f"Got {status} from {url}, forcing a token refresh and retrying")
+                    logger.warning(
+                        f"Tesla rejected the request (HTTP {status} from {url}); "
+                        "renewing the access token and retrying"
+                    )
                     self.token_manager.refresh_access_token()
                     continue
                 raise TeslaAPIError(f"Request failed: {e}") from e
@@ -453,9 +487,8 @@ class TeslaAPIClient:
             page_data = history.get("data") or []
             sessions.extend(page_data)
             logger.debug(
-                "Charging history page %s for %s: %s sessions (total %s, hasMoreData=%s)",
+                "Charging history page %s: %s sessions (total %s, hasMoreData=%s)",
                 page,
-                vin,
                 len(page_data),
                 history.get("totalResults"),
                 history.get("hasMoreData"),
@@ -468,7 +501,7 @@ class TeslaAPIClient:
                 logger.warning("Stopping charging history pagination after %s pages", CHARGING_HISTORY_MAX_PAGES)
                 break
 
-        logger.debug("Charging history for %s: %s sessions total", vin, len(sessions))
+        logger.debug("Charging history fetched: %s sessions total", len(sessions))
         return sessions
 
     @staticmethod
@@ -488,7 +521,10 @@ class TeslaAPIClient:
         url = "https://ownership.tesla.com/mobile-app/subscriptions/invoices"
         params = {**self._locale_params(vin), "optionCode": OPTION_CODE_SUBSCRIPTION}
         response = self.base_req(url, params=params)
-        logger.debug("Subscription invoices response for %s: %s", vin, json.dumps(response, default=str)[:4000])
+        # Only the record count — the raw response carries personal data
+        # (billing address etc.) that must not end up in logs.
+        if isinstance(response, dict):
+            logger.debug("Received %s subscription invoice record(s)", len(response.get("data") or []))
         return response
 
     def get_subscription_invoice(self, invoice_id: str, vin: str) -> bytes:

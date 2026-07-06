@@ -94,14 +94,14 @@ async def _run_sync(months: list[datetime] | None, kind: str) -> None:
             _sync_state["last_result"] = "ok"
             _sync_state["last_success"] = datetime.now().isoformat(timespec="seconds")
         except Exception as e:
-            logger.error(f"Sync ({kind}) failed: {e}")
+            logger.error(f"Invoice sync ({kind}) failed: {e}")
             _sync_state["last_result"] = str(e)
         finally:
             _sync_state.update({"running": False, "last_finished": datetime.now().isoformat(timespec="seconds")})
 
 
 async def _download_loop() -> None:
-    logger.info(f"Starting downloader loop (interval: {config.polling_interval} minutes)")
+    logger.info(f"Automatic sync started: checking for new invoices every {config.polling_interval} minutes")
     while True:
         await _run_sync(_current_and_previous_month(), kind="scheduled")
         # Jitter breaks the metronomic request cadence, which bot-mitigation

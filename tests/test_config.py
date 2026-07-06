@@ -53,7 +53,7 @@ def test_from_ha_parses_options(tmp_path):
     options.write_text(
         json.dumps(
             {
-                "access_token": "at",
+                "access_token": "at",  # removed HA option; must be ignored if left over
                 "refresh_token": "rt",
                 "polling_interval": 30,
                 "email": {"port": 25},
@@ -64,4 +64,6 @@ def test_from_ha_parses_options(tmp_path):
     assert config.homeassistant is True
     assert config.polling_interval == 30
     assert config.email_server_port == 25
-    assert config.env_access_token == "at"
+    assert config.env_refresh_token == "rt"
+    # The HA app has no access_token option; tokens come from the refresh flow
+    assert config.env_access_token == ""

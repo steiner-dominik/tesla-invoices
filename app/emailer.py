@@ -36,8 +36,8 @@ class EmailExporter:
         if path.exists() and path.stat().st_size > 0:
             try:
                 return json.loads(path.read_text())
-            except ValueError:
-                logger.warning(f"Could not parse metadata {path}, treating invoice as not sent")
+            except (ValueError, OSError):
+                logger.warning(f"Could not read metadata {path.name}, treating invoice as not sent")
         return {}
 
     def _pending_invoices(self) -> list[Path]:
@@ -77,7 +77,8 @@ class EmailExporter:
         )
         smtp.send_message(email)
 
-        logger.info(f"Sent mail to {recipient} for invoice {pdf.name}")
+        # No recipient address in the log — logs may end up in bug reports.
+        logger.info(f"Sent invoice {pdf.name} by email")
         metadata_path = pdf.with_suffix(".json")
         metadata = self._read_metadata(metadata_path)
         metadata["email_sent"] = int(time.time())
@@ -92,7 +93,7 @@ class EmailExporter:
             logger.debug("Email export: nothing to send")
             return
 
-        logger.info(f"Email export: sending {len(pending)} invoice(s) to {self.config.email_to}")
+        logger.info(f"Email export: sending {len(pending)} new invoice(s)")
         try:
             with self._connect() as smtp:
                 for pdf in pending:
