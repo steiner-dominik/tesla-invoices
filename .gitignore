@@ -1,0 +1,15 @@
+.DS_Store
+.envrc
+# Local runtime data (kept out of git; a .gitkeep keeps each directory)
+**/secrets/*.txt
+**/invoices/*
+!**/invoices/.gitkeep
+**/docker.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.agents/
+.claude/

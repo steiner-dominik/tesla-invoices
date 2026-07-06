@@ -1,0 +1,1155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tesla Invoices</title>
+    <style>
+        :root {
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --border: #e2e8f0;
+            --text: #1e293b;
+            --muted: #64748b;
+            --accent: #2563eb;
+            --accent-soft: #eff6ff;
+            --green: #16a34a;
+            --purple: #7e22ce;
+            --red: #dc2626;
+            --amber: #d97706;
+            --radius: 0.5rem;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        header {
+            background: var(--card);
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+        }
+        header h1 { font-size: 1.25rem; margin: 0; }
+        #sync-chip {
+            font-size: 0.8rem;
+            color: var(--muted);
+            padding: 0.25rem 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            background: var(--bg);
+        }
+        #sync-chip.warn { color: var(--amber); border-color: var(--amber); }
+        main { max-width: 78rem; margin: 0 auto; padding: 1.5rem; }
+        .banner {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            color: var(--red);
+            border-radius: var(--radius);
+            padding: 0.75rem 1rem;
+            margin-bottom: 1.25rem;
+            font-size: 0.875rem;
+        }
+        .tabs {
+            display: flex;
+            gap: 0.25rem;
+            margin-bottom: 1.25rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .tab-btn {
+            background: none;
+            border: none;
+            border-bottom: 2px solid transparent;
+            padding: 0.5rem 1rem;
+            font-size: 0.9rem;
+            color: var(--muted);
+            cursor: pointer;
+        }
+        .tab-btn.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+            font-weight: 600;
+        }
+        /* Unified surface used by cards, charts, tables, file browser, maintenance */
+        .panel {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+        }
+        .panel-pad { padding: 1rem 1.25rem; }
+        .panel-title { margin: 0 0 0.75rem; font-size: 0.9rem; font-weight: 600; }
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.25rem;
+        }
+        .card { padding: 1rem 1.25rem; }
+        .card h3 { margin: 0 0 0.25rem; font-size: 0.8rem; font-weight: 500; color: var(--muted); }
+        .card p { margin: 0; font-size: 1.5rem; font-weight: 600; }
+        .card small { color: var(--muted); font-size: 0.72rem; }
+        .card p.kwh { color: var(--accent); }
+        .card p.cost { color: var(--green); }
+        .charts {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.25rem;
+        }
+        .chart-card { padding: 1rem 1.25rem; }
+        .chart-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
+        .chart-head h3 { margin: 0; font-size: 0.9rem; font-weight: 600; }
+        .chart-caption { font-size: 0.78rem; color: var(--muted); min-height: 1.1rem; }
+        .chart-caption b { color: var(--text); font-weight: 600; }
+        .chart-card svg { width: 100%; height: auto; display: block; margin-top: 0.35rem; }
+        .chart-card svg rect.bar { cursor: pointer; transition: opacity 0.1s; }
+        .chart-card svg rect.bar:hover { opacity: 0.75; }
+        .chart-empty { color: var(--muted); font-size: 0.85rem; padding: 2rem 0; text-align: center; }
+        .filter-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        .filter-bar input[type="search"], .filter-bar select {
+            padding: 0.45rem 0.6rem;
+            border: 1px solid var(--border);
+            border-radius: 0.35rem;
+            font-size: 0.85rem;
+            background: var(--card);
+            color: var(--text);
+        }
+        .filter-bar input[type="search"] { flex: 1 1 12rem; min-width: 10rem; }
+        .filter-bar .spacer { flex: 1; }
+        .btn {
+            background: var(--card);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 0.35rem;
+            padding: 0.45rem 0.9rem;
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .btn:hover { background: var(--bg); }
+        .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+        .btn.primary:hover { opacity: 0.9; }
+        .btn:disabled { opacity: 0.6; cursor: default; }
+        .table-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+        th, td { padding: 0.6rem 0.7rem; text-align: left; white-space: nowrap; vertical-align: middle; }
+        th {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--muted);
+            border-bottom: 1px solid var(--border);
+            background: var(--bg);
+        }
+        th.sortable { cursor: pointer; user-select: none; }
+        th.sortable:hover { color: var(--accent); }
+        th .arrow { font-size: 0.65rem; }
+        td { border-bottom: 1px solid var(--border); }
+        tr:last-child td { border-bottom: none; }
+        td.num, th.num { text-align: right; }
+        /* Long site names must not stretch the table beyond the viewport:
+           truncate hard (tooltip shows the full name). 11rem keeps the whole
+           8-column table inside the 78rem container without a scrollbar. */
+        td.loc { max-width: 11rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .badge {
+            display: inline-block;
+            padding: 0.1rem 0.6rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        .badge.charging { background: #dbeafe; color: #1d4ed8; }
+        .badge.subscription { background: #f3e8ff; color: var(--purple); }
+        .row-actions { display: flex; gap: 0.35rem; justify-content: flex-end; }
+        a.action, button.action {
+            color: var(--accent);
+            background: var(--accent-soft);
+            border: none;
+            padding: 0.25rem 0.6rem;
+            border-radius: 0.35rem;
+            text-decoration: none;
+            font-size: 0.78rem;
+            font-weight: 500;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        a.action:hover, button.action:hover { background: #dbeafe; }
+        button.action:disabled { opacity: 0.5; cursor: default; }
+        .center { text-align: center; color: var(--muted); padding: 2rem 1rem; }
+        .error { color: var(--red); }
+        /* Files tab: two-pane browser, styled consistently with the table */
+        .browser-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.75rem;
+            flex-wrap: wrap;
+        }
+        .browser-panes {
+            display: grid;
+            grid-template-columns: minmax(15rem, 2fr) 3fr;
+            gap: 1rem;
+        }
+        @media (max-width: 48rem) { .browser-panes { grid-template-columns: 1fr; } }
+        .browser-list {
+            display: flex;
+            flex-direction: column;
+            border: 1px solid var(--border);
+            border-radius: 0.4rem;
+            max-height: 34rem;
+            overflow-y: auto;
+        }
+        .browser-item {
+            padding: 0.55rem 0.75rem;
+            cursor: pointer;
+            background: var(--card);
+            border-bottom: 1px solid var(--border);
+            overflow-wrap: anywhere;
+            display: flex;
+            flex-direction: column;
+            gap: 0.15rem;
+        }
+        .browser-item:last-child { border-bottom: none; }
+        .browser-item:hover { background: var(--bg); }
+        .browser-item .fname { font-size: 0.8rem; font-weight: 500; }
+        .browser-item .fmeta { color: var(--muted); font-size: 0.72rem; display: flex; gap: 0.4rem; align-items: center; }
+        .browser-item .factions { display: flex; gap: 0.35rem; margin-top: 0.2rem; }
+        button.action.danger { color: var(--red); background: #fef2f2; }
+        button.action.danger:hover { background: #fee2e2; }
+        .browser-item .ftag {
+            text-transform: uppercase;
+            font-size: 0.62rem;
+            letter-spacing: 0.04em;
+            padding: 0.05rem 0.35rem;
+            border-radius: 0.25rem;
+            background: var(--bg);
+            border: 1px solid var(--border);
+        }
+        .browser-item.active { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+        .browser-preview {
+            border: 1px solid var(--border);
+            border-radius: 0.4rem;
+            background: var(--bg);
+            padding: 0.75rem;
+            font-family: ui-monospace, SFMono-Regular, monospace;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 34rem;
+            overflow: auto;
+            font-size: 0.8rem;
+            align-self: start;
+            position: sticky;
+            top: 1rem;
+        }
+        /* Maintenance tab */
+        .maint-section { padding: 1rem 1.25rem; margin-bottom: 1rem; }
+        .maint-section h3 { margin: 0 0 0.35rem; font-size: 0.95rem; }
+        .maint-section p { margin: 0 0 0.75rem; color: var(--muted); font-size: 0.85rem; }
+        .maint-status { font-size: 0.8rem; color: var(--muted); margin-left: 0.5rem; }
+        dl.sync-info { display: grid; grid-template-columns: auto 1fr; gap: 0.25rem 1rem; font-size: 0.85rem; margin: 0; }
+        dl.sync-info dt { color: var(--muted); }
+        dl.sync-info dd { margin: 0; overflow-wrap: anywhere; }
+        footer {
+            max-width: 78rem;
+            margin: 0 auto;
+            padding: 0 1.5rem 1.5rem;
+            color: var(--muted);
+            font-size: 0.8rem;
+            display: flex;
+            gap: 0.4rem;
+            flex-wrap: wrap;
+        }
+        footer a { color: var(--accent); text-decoration: none; }
+        footer a:hover { text-decoration: underline; }
+        /* In-app PDF viewer: stays inside the ingress webview so no HA re-login */
+        .modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.55);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            z-index: 50;
+        }
+        .modal[hidden] { display: none; }
+        .modal-box {
+            background: var(--card);
+            border-radius: var(--radius);
+            width: min(60rem, 100%);
+            height: min(90vh, 100%);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        }
+        .modal-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            padding: 0.6rem 0.9rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .modal-head .title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .modal-head .actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
+        .modal-body { flex: 1; background: #525659; min-height: 0; }
+        .modal-body iframe { width: 100%; height: 100%; border: none; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Tesla Invoices</h1>
+        <span id="sync-chip">Loading…</span>
+    </header>
+
+    <main>
+        <div id="sync-banner" class="banner" hidden></div>
+
+        <nav class="tabs">
+            <button class="tab-btn active" type="button" data-tab="tab-dashboard">Dashboard</button>
+            <button class="tab-btn" type="button" data-tab="tab-files">Files</button>
+            <button class="tab-btn" type="button" data-tab="tab-maintenance">Maintenance</button>
+        </nav>
+
+        <section id="tab-dashboard">
+            <div class="filter-bar">
+                <input type="search" id="filter-search" placeholder="Search location, vehicle, file…">
+                <select id="filter-year"><option value="">All years</option></select>
+                <select id="filter-vehicle"><option value="">All vehicles</option></select>
+                <select id="filter-type">
+                    <option value="">All types</option>
+                    <option value="charging">Charging</option>
+                    <option value="subscription">Subscription</option>
+                </select>
+                <span class="spacer"></span>
+                <a class="btn" href="api/export.csv" download>Export CSV</a>
+            </div>
+
+            <div class="cards">
+                <div class="panel card"><h3>Invoices</h3><p id="stat-count">-</p></div>
+                <div class="panel card"><h3>Energy Charged</h3><p class="kwh" id="stat-kwh">-</p></div>
+                <div class="panel card"><h3>Total Cost</h3><p class="cost" id="stat-cost">-</p><small id="stat-cost-note"></small></div>
+                <div class="panel card"><h3>Vehicles</h3><p id="stat-vehicles">-</p></div>
+            </div>
+
+            <div class="charts">
+                <div class="panel chart-card">
+                    <div class="chart-head">
+                        <h3>Energy per month</h3>
+                        <span class="chart-caption" id="caption-kwh"></span>
+                    </div>
+                    <div id="chart-kwh"></div>
+                </div>
+                <div class="panel chart-card">
+                    <div class="chart-head">
+                        <h3 id="chart-cost-title">Cost per month</h3>
+                        <span class="chart-caption" id="caption-cost"></span>
+                    </div>
+                    <div id="chart-cost"></div>
+                </div>
+            </div>
+
+            <div class="panel table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="sortable" data-sort="date">Date <span class="arrow"></span></th>
+                            <th class="sortable" data-sort="vehicle">Vehicle <span class="arrow"></span></th>
+                            <th class="sortable" data-sort="type">Type <span class="arrow"></span></th>
+                            <th class="sortable" data-sort="location">Location <span class="arrow"></span></th>
+                            <th class="sortable num" data-sort="energy">Energy (kWh) <span class="arrow"></span></th>
+                            <th class="sortable num" data-sort="cost">Cost <span class="arrow"></span></th>
+                            <th class="sortable num" data-sort="perkwh">Price/kWh <span class="arrow"></span></th>
+                            <th class="num">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="invoice-table-body">
+                        <tr><td colspan="8" class="center">Loading data…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="tab-files" hidden>
+            <div class="panel panel-pad">
+                <div class="browser-header">
+                    <h2 class="panel-title" style="margin:0;">Stored files</h2>
+                    <div style="display:flex; gap:0.5rem; align-items:center;">
+                        <span id="files-browser-status" style="color: var(--muted); font-size:0.8rem;"></span>
+                        <button id="files-refresh-btn" class="btn" type="button">Refresh</button>
+                    </div>
+                </div>
+                <div class="browser-panes">
+                    <div id="files-browser-list" class="browser-list"></div>
+                    <div id="files-browser-preview" class="browser-preview">Select a file to preview its contents.</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="tab-maintenance" hidden>
+            <div class="panel maint-section">
+                <h3>Sync</h3>
+                <p>
+                    New invoices for the current and previous month are fetched automatically.
+                    A full sync downloads the entire charging and subscription history and can take a while.
+                </p>
+                <button id="sync-btn" class="btn primary" type="button">Sync all history</button>
+                <span id="sync-status" class="maint-status"></span>
+            </div>
+
+            <div class="panel maint-section">
+                <h3>Re-scan PDFs</h3>
+                <p>
+                    Re-extracts cost and currency from the stored subscription PDFs with the current
+                    parser. Useful after an app update when older metadata contains wrong values.
+                    Charging figures come from the Tesla API and are refreshed by a sync instead.
+                </p>
+                <button id="rescan-btn" class="btn primary" type="button">Re-scan PDFs</button>
+                <span id="rescan-status" class="maint-status"></span>
+            </div>
+
+            <div class="panel maint-section">
+                <h3>Sync status</h3>
+                <dl class="sync-info">
+                    <dt>Running</dt><dd id="info-running">-</dd>
+                    <dt>Last sync</dt><dd id="info-last-finished">-</dd>
+                    <dt>Last kind</dt><dd id="info-last-kind">-</dd>
+                    <dt>Last result</dt><dd id="info-last-result">-</dd>
+                    <dt>Last success</dt><dd id="info-last-success">-</dd>
+                </dl>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <span>Tesla Invoices</span>
+        <span>·</span>
+        <a href="https://dominik.st/einer" target="_blank" rel="noopener">dominik.st/einer</a>
+        <span>·</span>
+        <a href="https://github.com/aSauerwein" target="_blank" rel="noopener">github.com/aSauerwein</a>
+    </footer>
+
+    <div id="pdf-modal" class="modal" hidden>
+        <div class="modal-box">
+            <div class="modal-head">
+                <span class="title" id="pdf-modal-title">Invoice</span>
+                <div class="actions">
+                    <a id="pdf-modal-dl" class="btn" download>Download</a>
+                    <button id="pdf-modal-close" class="btn" type="button">Close</button>
+                </div>
+            </div>
+            <div class="modal-body">
+                <iframe id="pdf-modal-frame" title="Invoice PDF"></iframe>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // NOTE: all URLs are RELATIVE (no leading "/") so they stay inside the
+        // Home Assistant ingress path prefix instead of escaping to the HA root.
+        const API_ANALYTICS = 'api/analytics';
+        const API_DOWNLOAD = 'api/download/';
+        const API_EMAIL = 'api/email/';
+        const API_SYNC = 'api/sync?month=all';
+        const API_FILES = 'api/files';
+        const API_RESCAN = 'api/files/rescan';
+
+        let allData = [];
+        let summary = {};
+        let syncState = {};
+        let filesLoaded = false;
+        const filters = { search: '', year: '', vehicle: '', type: '' };
+        const sort = { key: 'date', dir: -1 };
+
+        // ---------- helpers ----------
+
+        // Location shows the charging site only; subscriptions have none (the
+        // type badge already says "subscription", so no filler text there).
+        function rowLocation(item) {
+            return item.site_name || '';
+        }
+
+        function rowVehicle(item) {
+            return item.vehicle_name || item.vin || '';
+        }
+
+        function monthKey(dateStr) {
+            return (dateStr || '').slice(0, 7); // YYYY-MM
+        }
+
+        function fmtMoney(value) {
+            return (value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        // Per-line effective price per kWh (own currency); null when not applicable.
+        function pricePerKwh(item) {
+            const kwh = item.energy_kwh || 0;
+            const cost = item.total_cost || 0;
+            if (item.type !== 'charging' || kwh <= 0 || cost <= 0) return null;
+            return cost / kwh;
+        }
+
+        function fmtBytes(n) {
+            if (n < 1024) return n + ' B';
+            if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+            return (n / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        function filteredData() {
+            const q = filters.search.toLowerCase();
+            return allData.filter((item) => {
+                if (filters.year && !(item.date || '').startsWith(filters.year)) return false;
+                if (filters.vehicle && rowVehicle(item) !== filters.vehicle) return false;
+                if (filters.type && item.type !== filters.type) return false;
+                if (q) {
+                    const haystack = [rowLocation(item), item.description, rowVehicle(item), item.type,
+                        item.filename, item.date].join(' ').toLowerCase();
+                    if (!haystack.includes(q)) return false;
+                }
+                return true;
+            });
+        }
+
+        // ---------- tabs ----------
+
+        function filesTabVisible() {
+            return !document.getElementById('tab-files').hidden;
+        }
+
+        document.querySelectorAll('.tab-btn').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b === btn));
+                for (const id of ['tab-dashboard', 'tab-files', 'tab-maintenance']) {
+                    document.getElementById(id).hidden = btn.dataset.tab !== id;
+                }
+                if (btn.dataset.tab === 'tab-files' && !filesLoaded) {
+                    filesLoaded = true;
+                    loadFiles();
+                }
+            });
+        });
+
+        // ---------- summary cards ----------
+
+        function renderCards(data) {
+            const primary = summary.primary_currency || '';
+
+            let costPrimary = 0;
+            let kwh = 0;
+            const currencies = new Set();
+            const vehicles = new Set();
+            for (const item of data) {
+                const c = item.total_cost || 0;
+                if (c) currencies.add(item.currency || '');
+                if ((item.currency || '') === primary) costPrimary += c;
+                if (item.type === 'charging') kwh += item.energy_kwh || 0;
+                vehicles.add(rowVehicle(item));
+            }
+
+            document.getElementById('stat-count').textContent = data.length;
+            document.getElementById('stat-kwh').textContent = kwh.toLocaleString(undefined, { maximumFractionDigits: 1 }) + ' kWh';
+            document.getElementById('stat-cost').textContent = fmtMoney(costPrimary) + ' ' + primary;
+
+            const others = [...currencies].filter((c) => c && c !== primary);
+            document.getElementById('stat-cost-note').textContent =
+                others.length ? '+ invoices in ' + others.join(', ') + ' (not converted)' : '';
+
+            document.getElementById('stat-vehicles').textContent = [...vehicles].filter(Boolean).length;
+        }
+
+        // ---------- charts ----------
+
+        function monthlyBuckets(data, valueFn) {
+            const buckets = new Map();
+            for (const item of data) {
+                const key = monthKey(item.date);
+                if (!key) continue;
+                buckets.set(key, (buckets.get(key) || 0) + valueFn(item));
+            }
+            let keys = [...buckets.keys()].sort();
+            if (keys.length > 1) {
+                // fill gap months with 0 so the x-axis is continuous. All
+                // months are kept (no cap), so the chart totals always match
+                // the summary cards; use the year filter to zoom in.
+                const filled = [];
+                const [startY, startM] = keys[0].split('-').map(Number);
+                const [endY, endM] = keys[keys.length - 1].split('-').map(Number);
+                for (let y = startY, m = startM; y < endY || (y === endY && m <= endM); m === 12 ? (y++, m = 1) : m++) {
+                    filled.push(y + '-' + String(m).padStart(2, '0'));
+                }
+                keys = filled;
+            }
+            return keys.map((k) => ({ month: k, value: buckets.get(k) || 0 }));
+        }
+
+        // Round an axis maximum up to a readable "nice" number.
+        function niceMax(value) {
+            if (value <= 0) return 1;
+            const pow = Math.pow(10, Math.floor(Math.log10(value)));
+            const norm = value / pow;
+            const nice = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10;
+            return nice * pow;
+        }
+
+        function fmtAxis(value) {
+            if (value >= 1000) return (value / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 }) + 'k';
+            return value.toLocaleString(undefined, { maximumFractionDigits: value < 10 ? 1 : 0 });
+        }
+
+        function monthLabel(key) {
+            const [y, m] = key.split('-');
+            return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString([], { month: 'short', year: '2-digit' });
+        }
+
+        function renderBarChart(containerId, captionId, buckets, color, unit) {
+            const container = document.getElementById(containerId);
+            const caption = document.getElementById(captionId);
+            container.replaceChildren();
+            if (!buckets.length || buckets.every((b) => b.value === 0)) {
+                caption.textContent = '';
+                const empty = document.createElement('div');
+                empty.className = 'chart-empty';
+                empty.textContent = 'No data for the current filters.';
+                container.appendChild(empty);
+                return;
+            }
+
+            const total = buckets.reduce((s, b) => s + b.value, 0);
+            const fmtVal = (v) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' ' + unit;
+            const defaultCaption = () => { caption.innerHTML = 'Total <b>' + fmtVal(total) + '</b>'; };
+            defaultCaption();
+
+            const W = 480, H = 190, padL = 38, padR = 6, padB = 24, padT = 10;
+            const plotW = W - padL - padR;
+            const plotH = H - padB - padT;
+            const max = niceMax(Math.max(...buckets.map((b) => b.value)));
+            const n = buckets.length;
+            const slot = plotW / n;
+            const barW = Math.max(4, Math.min(38, slot * 0.7));
+            const svgNS = 'http://www.w3.org/2000/svg';
+            const yFor = (v) => padT + plotH - (v / max) * plotH;
+
+            const svg = document.createElementNS(svgNS, 'svg');
+            svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+            // Y-axis gridlines + scale labels so magnitude is readable at a glance.
+            const ticks = 4;
+            for (let t = 0; t <= ticks; t++) {
+                const v = (max / ticks) * t;
+                const y = yFor(v);
+                const line = document.createElementNS(svgNS, 'line');
+                line.setAttribute('x1', padL);
+                line.setAttribute('x2', W - padR);
+                line.setAttribute('y1', y);
+                line.setAttribute('y2', y);
+                line.setAttribute('stroke', t === 0 ? '#cbd5e1' : '#eef2f7');
+                svg.appendChild(line);
+
+                const label = document.createElementNS(svgNS, 'text');
+                label.setAttribute('x', padL - 5);
+                label.setAttribute('y', y + 3);
+                label.setAttribute('text-anchor', 'end');
+                label.setAttribute('font-size', '8.5');
+                label.setAttribute('fill', '#94a3b8');
+                label.textContent = fmtAxis(v);
+                svg.appendChild(label);
+            }
+
+            buckets.forEach((b, i) => {
+                const h = (b.value / max) * plotH;
+                const x = padL + i * slot + (slot - barW) / 2;
+                const y = padT + plotH - h;
+
+                const rect = document.createElementNS(svgNS, 'rect');
+                rect.setAttribute('class', 'bar');
+                rect.setAttribute('x', x);
+                rect.setAttribute('y', y);
+                rect.setAttribute('width', barW);
+                rect.setAttribute('height', Math.max(h, b.value > 0 ? 1.5 : 0));
+                rect.setAttribute('rx', 2);
+                rect.setAttribute('fill', color);
+                const title = document.createElementNS(svgNS, 'title');
+                title.textContent = monthLabel(b.month) + ': ' + fmtVal(b.value);
+                rect.appendChild(title);
+                // Tap/hover updates the caption — works on mobile where :hover/title don't.
+                const show = () => { caption.innerHTML = monthLabel(b.month) + ' · <b>' + fmtVal(b.value) + '</b>'; };
+                rect.addEventListener('mouseenter', show);
+                rect.addEventListener('mouseleave', defaultCaption);
+                rect.addEventListener('click', show);
+                svg.appendChild(rect);
+
+                // x-axis label, thinned out when crowded
+                const every = n > 16 ? 3 : n > 8 ? 2 : 1;
+                if (i % every === 0) {
+                    const label = document.createElementNS(svgNS, 'text');
+                    label.setAttribute('x', x + barW / 2);
+                    label.setAttribute('y', H - padB + 12);
+                    label.setAttribute('text-anchor', 'middle');
+                    label.setAttribute('font-size', '8.5');
+                    label.setAttribute('fill', '#64748b');
+                    const [yr, mo] = b.month.split('-');
+                    label.textContent = mo + '/' + yr.slice(2);
+                    svg.appendChild(label);
+                }
+            });
+
+            container.appendChild(svg);
+        }
+
+        function renderCharts(data) {
+            const primary = summary.primary_currency || '';
+            renderBarChart(
+                'chart-kwh', 'caption-kwh',
+                monthlyBuckets(data.filter((d) => d.type === 'charging'), (d) => d.energy_kwh || 0),
+                'var(--accent)', 'kWh'
+            );
+            document.getElementById('chart-cost-title').textContent =
+                'Cost per month' + (primary ? ' (' + primary + ')' : '');
+            renderBarChart(
+                'chart-cost', 'caption-cost',
+                monthlyBuckets(data.filter((d) => (d.currency || '') === primary), (d) => d.total_cost || 0),
+                'var(--green)', primary
+            );
+        }
+
+        // ---------- table ----------
+
+        const sortAccessors = {
+            date: (i) => i.date || '',
+            vehicle: (i) => rowVehicle(i).toLowerCase(),
+            type: (i) => i.type || '',
+            location: (i) => rowLocation(i).toLowerCase(),
+            energy: (i) => i.energy_kwh || 0,
+            cost: (i) => i.total_cost || 0,
+            perkwh: (i) => pricePerKwh(i) || 0,
+        };
+
+        function cell(text, className) {
+            const td = document.createElement('td');
+            if (className) td.className = className;
+            td.textContent = text;
+            return td;
+        }
+
+        function messageRow(text, isError) {
+            const tr = document.createElement('tr');
+            const td = document.createElement('td');
+            td.colSpan = 8;
+            td.className = 'center' + (isError ? ' error' : '');
+            td.textContent = text;
+            tr.appendChild(td);
+            return tr;
+        }
+
+        function renderTable(data) {
+            const tbody = document.getElementById('invoice-table-body');
+            tbody.replaceChildren();
+            if (data.length === 0) {
+                tbody.appendChild(messageRow(allData.length === 0
+                    ? 'No invoices found. Run "Sync all history" on the Maintenance tab to fetch older invoices.'
+                    : 'No invoices match the current filters.'));
+                return;
+            }
+
+            const accessor = sortAccessors[sort.key] || sortAccessors.date;
+            const sorted = [...data].sort((a, b) => {
+                const va = accessor(a), vb = accessor(b);
+                return (va < vb ? -1 : va > vb ? 1 : 0) * sort.dir;
+            });
+
+            document.querySelectorAll('th.sortable').forEach((th) => {
+                th.querySelector('.arrow').textContent = th.dataset.sort === sort.key ? (sort.dir > 0 ? '▲' : '▼') : '';
+            });
+
+            for (const item of sorted) {
+                const tr = document.createElement('tr');
+                const isCharging = item.type === 'charging';
+
+                tr.appendChild(cell(new Date(item.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })));
+                tr.appendChild(cell(rowVehicle(item) || 'Unknown'));
+
+                const typeTd = document.createElement('td');
+                const badge = document.createElement('span');
+                badge.className = 'badge ' + (isCharging ? 'charging' : 'subscription');
+                badge.textContent = item.type || '-';
+                typeTd.appendChild(badge);
+                tr.appendChild(typeTd);
+
+                const loc = rowLocation(item) || '-';
+                const locTd = cell(loc, 'loc');
+                locTd.title = loc; // full text on hover, since the cell truncates
+                tr.appendChild(locTd);
+
+                tr.appendChild(cell(isCharging ? (item.energy_kwh || 0).toFixed(2) : '-', 'num'));
+                tr.appendChild(cell(fmtMoney(item.total_cost) + ' ' + (item.currency || ''), 'num'));
+
+                const rate = pricePerKwh(item);
+                tr.appendChild(cell(rate !== null ? rate.toFixed(2) + ' ' + (item.currency || '') : '-', 'num'));
+
+                const actionTd = document.createElement('td');
+                actionTd.className = 'num';
+                const actions = document.createElement('div');
+                actions.className = 'row-actions';
+                if (item.filename && item.filename.toLowerCase().endsWith('.pdf')) {
+                    const view = document.createElement('button');
+                    view.className = 'action';
+                    view.type = 'button';
+                    view.textContent = 'View';
+                    view.addEventListener('click', () => openPdf(item.filename));
+                    actions.appendChild(view);
+
+                    const dl = document.createElement('a');
+                    dl.className = 'action';
+                    dl.href = API_DOWNLOAD + encodeURIComponent(item.filename);
+                    dl.textContent = 'Download';
+                    actions.appendChild(dl);
+
+                    if (summary.email_configured) {
+                        const mail = document.createElement('button');
+                        mail.className = 'action';
+                        mail.type = 'button';
+                        mail.textContent = item.email_sent ? 'Re-send' : 'Email';
+                        mail.addEventListener('click', () => emailInvoice(item.filename, mail));
+                        actions.appendChild(mail);
+                    }
+                }
+                if (!actions.childElementCount) actions.textContent = '-';
+                actionTd.appendChild(actions);
+                tr.appendChild(actionTd);
+                tbody.appendChild(tr);
+            }
+        }
+
+        // ---------- in-app PDF viewer ----------
+
+        function openPdf(filename) {
+            // Same-origin ingress URL in an iframe keeps the HA session, so the
+            // mobile app does not bounce out to an external browser / re-login.
+            const url = API_DOWNLOAD + encodeURIComponent(filename) + '?inline=true';
+            document.getElementById('pdf-modal-title').textContent = filename;
+            document.getElementById('pdf-modal-frame').src = url;
+            document.getElementById('pdf-modal-dl').href = API_DOWNLOAD + encodeURIComponent(filename);
+            document.getElementById('pdf-modal').hidden = false;
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closePdf() {
+            document.getElementById('pdf-modal').hidden = true;
+            document.getElementById('pdf-modal-frame').src = ''; // stop loading / free memory
+            document.body.style.overflow = '';
+        }
+
+        document.getElementById('pdf-modal-close').addEventListener('click', closePdf);
+        document.getElementById('pdf-modal').addEventListener('click', (e) => {
+            if (e.target.id === 'pdf-modal') closePdf(); // click on backdrop
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && !document.getElementById('pdf-modal').hidden) closePdf();
+        });
+
+        async function emailInvoice(filename, btn) {
+            // Recipient is editable per send; config's email.to is the default
+            const to = prompt('Send "' + filename + '" by email to:', summary.email_default_to || '');
+            if (to === null) return; // cancelled
+            const recipient = to.trim();
+            if (!recipient || !recipient.includes('@')) {
+                alert('Please enter a valid email address.');
+                return;
+            }
+            btn.disabled = true;
+            const original = btn.textContent;
+            btn.textContent = 'Sending…';
+            try {
+                const response = await fetch(
+                    API_EMAIL + encodeURIComponent(filename) + '?to=' + encodeURIComponent(recipient),
+                    { method: 'POST' }
+                );
+                const body = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(body.detail || ('HTTP ' + response.status));
+                btn.textContent = 'Sent ✓';
+            } catch (error) {
+                console.error('Failed to send email:', error);
+                alert('Sending failed: ' + error.message);
+                btn.textContent = original;
+                btn.disabled = false;
+            }
+        }
+
+        // ---------- filters ----------
+
+        function populateFilterOptions() {
+            const years = [...new Set(allData.map((i) => (i.date || '').slice(0, 4)).filter(Boolean))].sort().reverse();
+            const vehicles = [...new Set(allData.map(rowVehicle).filter(Boolean))].sort();
+
+            const yearSel = document.getElementById('filter-year');
+            const current = yearSel.value;
+            yearSel.replaceChildren(new Option('All years', ''));
+            years.forEach((y) => yearSel.appendChild(new Option(y, y)));
+            if ([...yearSel.options].some((o) => o.value === current)) yearSel.value = current;
+
+            const vehicleSel = document.getElementById('filter-vehicle');
+            const currentVehicle = vehicleSel.value;
+            vehicleSel.replaceChildren(new Option('All vehicles', ''));
+            vehicles.forEach((v) => vehicleSel.appendChild(new Option(v, v)));
+            if ([...vehicleSel.options].some((o) => o.value === currentVehicle)) vehicleSel.value = currentVehicle;
+        }
+
+        function applyFilters() {
+            const data = filteredData();
+            renderCards(data);
+            renderCharts(data);
+            renderTable(data);
+        }
+
+        document.getElementById('filter-search').addEventListener('input', (e) => {
+            filters.search = e.target.value.trim();
+            applyFilters();
+        });
+        document.getElementById('filter-year').addEventListener('change', (e) => {
+            filters.year = e.target.value;
+            applyFilters();
+        });
+        document.getElementById('filter-vehicle').addEventListener('change', (e) => {
+            filters.vehicle = e.target.value;
+            applyFilters();
+        });
+        document.getElementById('filter-type').addEventListener('change', (e) => {
+            filters.type = e.target.value;
+            applyFilters();
+        });
+        document.querySelectorAll('th.sortable').forEach((th) => {
+            th.addEventListener('click', () => {
+                if (sort.key === th.dataset.sort) {
+                    sort.dir = -sort.dir;
+                } else {
+                    sort.key = th.dataset.sort;
+                    sort.dir = th.dataset.sort === 'date' ? -1 : 1;
+                }
+                renderTable(filteredData());
+            });
+        });
+
+        // ---------- sync status ----------
+
+        function renderSyncState() {
+            const chip = document.getElementById('sync-chip');
+            const banner = document.getElementById('sync-banner');
+
+            if (syncState.running) {
+                chip.textContent = 'Sync running…';
+                chip.classList.remove('warn');
+            } else if (syncState.last_success) {
+                chip.textContent = 'Last sync: ' + new Date(syncState.last_success).toLocaleString();
+                chip.classList.remove('warn');
+            } else {
+                chip.textContent = 'No successful sync yet';
+                chip.classList.add('warn');
+            }
+
+            const failed = syncState.last_result && syncState.last_result !== 'ok';
+            banner.hidden = !failed;
+            if (failed) {
+                banner.textContent = 'Last sync failed: ' + syncState.last_result;
+            }
+
+            document.getElementById('info-running').textContent = syncState.running ? 'yes' : 'no';
+            document.getElementById('info-last-finished').textContent = syncState.last_finished || '-';
+            document.getElementById('info-last-kind').textContent = syncState.last_kind || '-';
+            document.getElementById('info-last-result').textContent = syncState.last_result || '-';
+            document.getElementById('info-last-success').textContent = syncState.last_success || '-';
+        }
+
+        // ---------- data loading ----------
+
+        async function loadData() {
+            const tbody = document.getElementById('invoice-table-body');
+            try {
+                const response = await fetch(API_ANALYTICS);
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                const result = await response.json();
+                summary = result.summary || {};
+                allData = result.data || [];
+                syncState = result.sync || {};
+
+                populateFilterOptions();
+                renderSyncState();
+                applyFilters();
+            } catch (error) {
+                console.error('Failed to load analytics:', error);
+                tbody.replaceChildren(messageRow('Failed to load data. See browser console for details.', true));
+            }
+        }
+
+        // ---------- files tab ----------
+
+        async function loadFiles() {
+            const status = document.getElementById('files-browser-status');
+            const list = document.getElementById('files-browser-list');
+            const preview = document.getElementById('files-browser-preview');
+            try {
+                const response = await fetch(API_FILES);
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                const result = await response.json();
+                const files = result.files || [];
+                status.textContent = files.length + ' file(s), newest invoice first';
+                list.replaceChildren();
+                preview.textContent = 'Select a file to preview its contents.';
+
+                if (files.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.className = 'center';
+                    empty.textContent = 'No files have been stored yet.';
+                    list.appendChild(empty);
+                    return;
+                }
+
+                for (const file of files) {
+                    const item = document.createElement('div');
+                    item.className = 'browser-item';
+
+                    const name = document.createElement('span');
+                    name.className = 'fname';
+                    name.textContent = file.name;
+
+                    const meta = document.createElement('span');
+                    meta.className = 'fmeta';
+                    const tag = document.createElement('span');
+                    tag.className = 'ftag';
+                    tag.textContent = file.type;
+                    const info = document.createElement('span');
+                    // invoice date from the metadata sidecar; file mtime as fallback
+                    info.textContent = fmtBytes(file.size) + ' · ' + new Date(file.date || file.modified).toLocaleString();
+                    meta.append(tag, info);
+
+                    const actions = document.createElement('span');
+                    actions.className = 'factions';
+                    if (file.type === 'pdf') {
+                        const view = document.createElement('button');
+                        view.className = 'action';
+                        view.type = 'button';
+                        view.textContent = 'View';
+                        view.addEventListener('click', (e) => { e.stopPropagation(); openPdf(file.name); });
+                        actions.appendChild(view);
+                    }
+                    const dl = document.createElement('a');
+                    dl.className = 'action';
+                    dl.href = API_DOWNLOAD + encodeURIComponent(file.name);
+                    dl.textContent = 'Download';
+                    dl.addEventListener('click', (e) => e.stopPropagation());
+                    actions.appendChild(dl);
+                    const del = document.createElement('button');
+                    del.className = 'action danger';
+                    del.type = 'button';
+                    del.textContent = 'Delete';
+                    del.addEventListener('click', (e) => { e.stopPropagation(); deleteFile(file.name); });
+                    actions.appendChild(del);
+
+                    item.append(name, meta, actions);
+                    item.addEventListener('click', () => {
+                        document.querySelectorAll('.browser-item').forEach((c) => c.classList.remove('active'));
+                        item.classList.add('active');
+                        preview.textContent = file.preview || '(no preview available)';
+                    });
+                    list.appendChild(item);
+                }
+            } catch (error) {
+                console.error('Failed to load files:', error);
+                status.textContent = 'Failed to load files.';
+                list.replaceChildren();
+                preview.textContent = 'Unable to load stored files.';
+            }
+        }
+
+        // ---------- maintenance actions ----------
+
+        document.getElementById('sync-btn').addEventListener('click', async () => {
+            if (!confirm('Download the complete invoice history? This can take a while.')) return;
+            const btn = document.getElementById('sync-btn');
+            const status = document.getElementById('sync-status');
+            btn.disabled = true;
+            status.textContent = 'Starting sync…';
+            try {
+                const response = await fetch(API_SYNC, { method: 'POST' });
+                if (response.status === 409) {
+                    status.textContent = 'A sync is already running.';
+                } else if (!response.ok) {
+                    throw new Error('HTTP ' + response.status);
+                } else {
+                    status.textContent = 'Sync started – this can take a while.';
+                }
+            } catch (error) {
+                console.error('Failed to start sync:', error);
+                status.textContent = 'Failed to start sync.';
+            } finally {
+                setTimeout(() => { btn.disabled = false; loadData(); }, 5000);
+            }
+        });
+
+        document.getElementById('rescan-btn').addEventListener('click', async () => {
+            const btn = document.getElementById('rescan-btn');
+            const status = document.getElementById('rescan-status');
+            btn.disabled = true;
+            status.textContent = 'Re-scanning…';
+            try {
+                const response = await fetch(API_RESCAN, { method: 'POST' });
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                const result = await response.json();
+                status.textContent = 'Updated ' + (result.updated || 0) + ' file(s).';
+                loadData();
+                if (filesLoaded) loadFiles();
+            } catch (error) {
+                console.error('Failed to re-scan PDFs:', error);
+                status.textContent = 'Re-scan failed.';
+            } finally {
+                btn.disabled = false;
+            }
+        });
+
+        async function deleteFile(filename) {
+            if (!confirm('Delete "' + filename + '"?\n\nNote: a deleted PDF will be downloaded again on the next sync as long as its invoice exists at Tesla.')) return;
+            try {
+                const response = await fetch('api/files/' + encodeURIComponent(filename), { method: 'DELETE' });
+                if (!response.ok) {
+                    const body = await response.json().catch(() => ({}));
+                    throw new Error(body.detail || ('HTTP ' + response.status));
+                }
+                loadFiles();
+                loadData(); // analytics change when a metadata sidecar is removed
+            } catch (error) {
+                console.error('Failed to delete file:', error);
+                alert('Deleting failed: ' + error.message);
+            }
+        }
+
+        document.getElementById('files-refresh-btn').addEventListener('click', loadFiles);
+        document.addEventListener('DOMContentLoaded', loadData);
+        // Refresh periodically so a running sync's results show up
+        setInterval(() => {
+            loadData();
+            if (filesTabVisible()) loadFiles();
+        }, 60000);
+    </script>
+</body>
+</html>

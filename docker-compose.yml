@@ -1,0 +1,14 @@
+services:
+  tesla-invoices:
+    build: .
+    # or use the prebuilt image instead of build:
+    # image: ghcr.io/steiner-dominik/tesla-invoices:latest
+    container_name: tesla-invoices
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    env_file:
+      - docker.env
+    volumes:
+      - ./invoices:/opt/tesla-invoices/invoices
+      - ./secrets:/opt/tesla-invoices/secrets

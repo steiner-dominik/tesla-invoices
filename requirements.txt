@@ -1,0 +1,7 @@
+requests==2.34.2
+urllib3==2.7.0
+# Auth only: Tesla rejects tokens refreshed with a non-browser TLS fingerprint
+curl_cffi==0.15.0
+fastapi==0.139.0
+uvicorn==0.50.0
+pypdf==5.1.0
