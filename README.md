@@ -1,5 +1,9 @@
 # ⚡ Tesla Invoices
 
+[![GitHub Sponsors](https://img.shields.io/badge/GitHub%20Sponsors-%E2%9D%A4-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/steiner-dominik)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-donate-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/dominik_steiner)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/dominik.st)
+
 **Automatically download all your Tesla charging & subscription invoices — and actually understand them.**
 
 Tesla Invoices fetches every Supercharging and subscription invoice from your Tesla account,
@@ -131,6 +135,14 @@ The layout is deliberately small: [app/api.py](app/api.py) (Tesla API client + a
 [app/downloader.py](app/downloader.py) (invoice download + PDF cost extraction),
 [app/server.py](app/server.py) (FastAPI backend), [app/emailer.py](app/emailer.py)
 (SMTP export), [app/static/index.html](app/static/index.html) (dependency-free dashboard).
+
+## ❤️ Support the project
+
+If Tesla Invoices is useful to you, you can support its development:
+
+- [GitHub Sponsors](https://github.com/sponsors/steiner-dominik)
+- [Ko-fi](https://ko-fi.com/dominik_steiner)
+- [Buy Me a Coffee](https://buymeacoffee.com/dominik.st)
 
 ## 🙏 Credits
 
