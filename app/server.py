@@ -47,7 +47,8 @@ def _safe_file_entry(path: Path) -> dict[str, Any]:
         "name": path.name,
         "type": file_type,
         "size": stat.st_size,
-        "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+        # With UTC offset, so browsers in another time zone parse it correctly
+        "modified": datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat(timespec="seconds"),
         "preview": preview,
     }
 
@@ -85,19 +86,24 @@ def _current_and_previous_month() -> list[datetime]:
     return [cur, prev]
 
 
-async def _run_sync(months: list[datetime] | None, kind: str) -> None:
+def _now_iso() -> str:
+    # With UTC offset, so browsers in another time zone parse it correctly
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+async def _run_sync(months: list[datetime] | None, kind: str, skip_email: bool = False) -> None:
     async with _sync_lock:
         _sync_state.update({"running": True, "last_kind": kind})
         try:
             await asyncio.to_thread(downloader.download_invoices, months)
-            await asyncio.to_thread(emailer.send_pending)
+            await asyncio.to_thread(emailer.send_pending, skip_email)
             _sync_state["last_result"] = "ok"
-            _sync_state["last_success"] = datetime.now().isoformat(timespec="seconds")
+            _sync_state["last_success"] = _now_iso()
         except Exception as e:
             logger.error(f"Invoice sync ({kind}) failed: {e}")
             _sync_state["last_result"] = str(e)
         finally:
-            _sync_state.update({"running": False, "last_finished": datetime.now().isoformat(timespec="seconds")})
+            _sync_state.update({"running": False, "last_finished": _now_iso()})
 
 
 async def _download_loop() -> None:
@@ -159,8 +165,11 @@ def _collect_analytics() -> dict[str, Any]:
     cost_by_currency: dict[str, float] = {}
     total_kwh = 0.0
     vehicles = set()
+    email_skipped_count = 0
 
     for json_file in config.invoice_path.glob("*.json"):
+        if json_file.name.startswith("."):
+            continue  # internal state files (e.g. the email export state)
         try:
             with open(json_file) as f:
                 meta = json.load(f)
@@ -172,6 +181,8 @@ def _collect_analytics() -> dict[str, Any]:
                 if meta.get("type") == "charging":
                     total_kwh += float(meta.get("energy_kwh", 0) or 0)
                 vehicles.add(meta.get("vehicle_name") or meta.get("vin"))
+                if "email_skipped" in meta and "email_sent" not in meta:
+                    email_skipped_count += 1
         except Exception as e:
             logger.error(f"Failed to read {json_file}: {e}")
 
@@ -194,6 +205,10 @@ def _collect_analytics() -> dict[str, Any]:
         "email_configured": emailer.is_configured,
         # Pre-populates the recipient prompt of the manual Email button
         "email_default_to": config.email_to,
+        # The UI only offers "also email during this sync" when auto-export is on
+        "email_export_enabled": config.enable_email_export,
+        # Invoices flagged email_skipped, sendable via the combined export
+        "email_skipped_count": email_skipped_count,
     }
 
     return {"summary": summary, "data": data, "sync": _sync_state}
@@ -220,7 +235,8 @@ def _scan_files() -> dict[str, Any]:
 
     files = []
     for path in invoice_dir.iterdir():
-        if path.is_file():
+        # Dotfiles are internal state (e.g. the email export state), not invoices
+        if path.is_file() and not path.name.startswith("."):
             entry = _safe_file_entry(path)
             if entry:
                 entry["date"] = _invoice_date(path)
@@ -286,8 +302,12 @@ def _rescan_pdfs() -> dict[str, Any]:
 
 
 @app.post("/api/sync", status_code=202)
-async def trigger_sync(month: str = "all") -> dict[str, str]:
-    """Manually trigger a download: month=all|cur|prev|YYYY-MM."""
+async def trigger_sync(month: str = "all", skip_email: bool = False) -> dict[str, str]:
+    """Manually trigger a download: month=all|cur|prev|YYYY-MM.
+
+    ``skip_email=true`` marks the invoices found by this sync as skipped
+    instead of emailing each one — meant for bulk/history syncs, where one
+    mail per invoice would flood the recipient."""
     global _manual_sync_task
     # Also check the pending manual task: two rapid clicks would both pass the
     # lock check (the first task may not have acquired the lock yet) and queue
@@ -305,7 +325,7 @@ async def trigger_sync(month: str = "all") -> dict[str, str]:
         except ValueError:
             raise HTTPException(status_code=422, detail="month must be all, cur, prev or YYYY-MM") from None
 
-    _manual_sync_task = asyncio.create_task(_run_sync(months, kind=f"manual ({month})"))
+    _manual_sync_task = asyncio.create_task(_run_sync(months, kind=f"manual ({month})", skip_email=skip_email))
     return {"status": "started", "month": month}
 
 
@@ -340,6 +360,25 @@ async def delete_file(filename: str) -> dict[str, str]:
     file_path.unlink()
     logger.info(f"Deleted {file_path.name} via file browser")
     return {"status": "deleted", "file": file_path.name}
+
+
+# NOTE: must be registered before /api/email/{filename}, or "send-skipped"
+# would be interpreted as a file name by the route below.
+@app.post("/api/email/send-skipped")
+async def email_skipped_invoices(to: str | None = None) -> dict[str, Any]:
+    """Send all invoices flagged ``email_skipped`` as a combined export
+    (batched into a few emails instead of one per invoice)."""
+    if not emailer.is_configured:
+        raise HTTPException(status_code=400, detail="Email is not configured (from/mailserver missing)")
+    recipient = (to or config.email_to).strip()
+    if "@" not in recipient:
+        raise HTTPException(status_code=422, detail="Recipient must be a valid email address")
+    try:
+        result = await asyncio.to_thread(emailer.send_skipped, recipient)
+    except Exception as e:
+        logger.error(f"Combined email export failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Sending failed: {e}") from e
+    return {"status": "sent", "to": recipient, **result}
 
 
 @app.post("/api/email/{filename}")
@@ -394,6 +433,8 @@ def _build_csv() -> Response:
     ]
     rows = []
     for json_file in config.invoice_path.glob("*.json"):
+        if json_file.name.startswith("."):
+            continue  # internal state files (e.g. the email export state)
         try:
             meta = json.loads(json_file.read_text())
             rows.append({field: _csv_safe(meta.get(field, "")) for field in fields})

@@ -145,6 +145,65 @@ def test_email_endpoint_custom_recipient(client, monkeypatch):
     assert client.post("/api/email/invoice.pdf").status_code == 422
 
 
+def test_send_skipped_endpoint(client, monkeypatch):
+    monkeypatch.setattr(server.config, "email_server", "mail.example.com")
+    monkeypatch.setattr(server.config, "email_from", "a@example.com")
+    monkeypatch.setattr(server.config, "email_to", "b@example.com")
+
+    calls = []
+
+    def fake_send_skipped(to):
+        calls.append(to)
+        return {"sent": 3, "emails": 1}
+
+    monkeypatch.setattr(server.emailer, "send_skipped", fake_send_skipped)
+
+    response = client.post("/api/email/send-skipped")
+    assert response.status_code == 200
+    assert response.json() == {"status": "sent", "to": "b@example.com", "sent": 3, "emails": 1}
+    assert calls == ["b@example.com"]
+
+    # Custom recipient overrides the configured default
+    response = client.post("/api/email/send-skipped?to=custom%40example.com")
+    assert response.json()["to"] == "custom@example.com"
+
+    assert client.post("/api/email/send-skipped?to=notanaddress").status_code == 422
+
+
+def test_send_skipped_requires_configuration(client):
+    assert client.post("/api/email/send-skipped").status_code == 400
+
+
+def test_analytics_counts_skipped_and_reports_export_flag(client):
+    import json as jsonlib
+
+    base = {"type": "charging", "date": "2026-07-01T10:00:00", "total_cost": 1.0, "currency": "EUR"}
+    (server.config.invoice_path / "skipped.json").write_text(jsonlib.dumps({**base, "email_skipped": 1}))
+    (server.config.invoice_path / "sent.json").write_text(
+        jsonlib.dumps({**base, "email_skipped": 1, "email_sent": 2})
+    )
+    (server.config.invoice_path / "fresh.json").write_text(jsonlib.dumps(base))
+
+    summary = client.get("/api/analytics").json()["summary"]
+    assert summary["email_skipped_count"] == 1
+    assert summary["email_export_enabled"] is False
+
+
+def test_internal_state_files_are_hidden(client):
+    import json as jsonlib
+
+    state = server.config.invoice_path / ".email_export_state.json"
+    state.write_text(jsonlib.dumps({"export_enabled": True}))
+    (server.config.invoice_path / "invoice.pdf").write_bytes(b"%PDF-fake")
+
+    files = client.get("/api/files").json()["files"]
+    assert [entry["name"] for entry in files] == ["invoice.pdf"]
+
+    # The state file must not appear as an invoice row in analytics/CSV either
+    assert client.get("/api/analytics").json()["summary"]["invoice_count"] == 0
+    assert len(client.get("/api/export.csv").text.strip().splitlines()) == 1  # header only
+
+
 def test_csv_export(client):
     import json as jsonlib
 
