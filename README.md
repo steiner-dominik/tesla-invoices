@@ -132,6 +132,7 @@ The dashboard is a thin client over a small REST API you can use directly:
 | `POST /api/sync?month=all\|cur\|prev\|YYYY-MM&skip_email=true` | Trigger a sync for a month range; `skip_email` marks new invoices as skipped instead of emailing each one |
 | `GET /api/analytics` | All invoice metadata + summary + sync status |
 | `GET /api/export.csv` | CSV export of all invoices |
+| `GET /api/export.zip` | All invoice PDFs bundled into one ZIP |
 | `GET /api/download/{filename}?inline=true` | Download / view an invoice PDF |
 | `POST /api/email/{filename}?to=…` | Email one invoice to any recipient |
 | `POST /api/email/send-skipped?to=…` | Email all skipped invoices as a combined, batched export |

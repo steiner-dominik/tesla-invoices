@@ -216,6 +216,9 @@
         .chart-card svg { width: 100%; height: auto; display: block; margin-top: 0.35rem; }
         .chart-card svg rect.bar { cursor: pointer; transition: opacity 0.1s; }
         .chart-card svg rect.bar:hover { opacity: 0.75; }
+        /* Zero-value months: thin stub bar, faded so it reads as "empty".
+           Placed after the :hover rule so the fade also wins on hover. */
+        .chart-card svg rect.bar.zero { opacity: 0.35; }
         /* Grid/label colors via classes so they follow the active theme */
         .chart-card svg line.grid { stroke: var(--chart-grid); }
         .chart-card svg line.grid.base { stroke: var(--chart-grid-base); }
@@ -371,16 +374,6 @@
         .maint-section h3 { margin: 0 0 0.35rem; font-size: 0.95rem; }
         .maint-section p { margin: 0 0 0.75rem; color: var(--muted); font-size: 0.85rem; }
         .maint-status { font-size: 0.8rem; color: var(--muted); margin-left: 0.5rem; }
-        .check-label {
-            display: flex;
-            align-items: center;
-            gap: 0.45rem;
-            font-size: 0.85rem;
-            margin: 0 0 0.75rem;
-            cursor: pointer;
-        }
-        .check-label input { accent-color: var(--accent); }
-        .check-label[hidden] { display: none; } /* display:flex would beat the hidden attribute */
         dl.sync-info { display: grid; grid-template-columns: auto 1fr; gap: 0.25rem 1rem; font-size: 0.85rem; margin: 0; }
         dl.sync-info dt { color: var(--muted); }
         dl.sync-info dd { margin: 0; overflow-wrap: anywhere; }
@@ -472,6 +465,7 @@
                 </select>
                 <span class="spacer"></span>
                 <a class="btn" href="api/export.csv" download>Export CSV</a>
+                <a class="btn" href="api/export.zip" download>Download all (ZIP)</a>
             </div>
 
             <div class="cards">
@@ -541,12 +535,9 @@
                 <p>
                     New invoices for the current and previous month are fetched automatically.
                     A full sync downloads the entire charging and subscription history and can take a while.
+                    If the automatic email export is enabled, you will be asked whether the invoices
+                    found by this sync should also be emailed (default: no).
                 </p>
-                <label class="check-label" id="sync-email-option" hidden>
-                    <input type="checkbox" id="sync-email-checkbox">
-                    Also email each new invoice found by this sync (a full history sync can produce a lot of mails —
-                    leave unchecked to mark them as skipped instead)
-                </label>
                 <button id="sync-btn" class="btn primary" type="button">Sync all history</button>
                 <span id="sync-status" class="maint-status"></span>
             </div>
@@ -780,25 +771,40 @@
 
         // ---------- charts ----------
 
-        function monthlyBuckets(data, valueFn) {
+        // First and last month across ALL currently filtered invoices — both
+        // charts use this as their x-axis range, so their timelines line up
+        // even when one kind of data (charging vs. subscription) starts later.
+        function monthRange(data) {
+            let min = '', max = '';
+            for (const item of data) {
+                const key = monthKey(item.date);
+                if (!key) continue;
+                if (!min || key < min) min = key;
+                if (!max || key > max) max = key;
+            }
+            return min ? [min, max] : null;
+        }
+
+        function monthlyBuckets(data, valueFn, range) {
             const buckets = new Map();
             for (const item of data) {
                 const key = monthKey(item.date);
                 if (!key) continue;
                 buckets.set(key, (buckets.get(key) || 0) + valueFn(item));
             }
-            let keys = [...buckets.keys()].sort();
-            if (keys.length > 1) {
-                // fill gap months with 0 so the x-axis is continuous. All
-                // months are kept (no cap), so the chart totals always match
-                // the summary cards; use the year filter to zoom in.
-                const filled = [];
-                const [startY, startM] = keys[0].split('-').map(Number);
-                const [endY, endM] = keys[keys.length - 1].split('-').map(Number);
+            // Fill the whole range (shared across both charts) with explicit
+            // 0 entries so gap months show as 0 bars and the x-axis is
+            // continuous. All months are kept (no cap), so the chart totals
+            // always match the summary cards; use the year filter to zoom in.
+            const sorted = [...buckets.keys()].sort();
+            const [start, end] = range || [sorted[0], sorted[sorted.length - 1]];
+            let keys = [];
+            if (start) {
+                const [startY, startM] = start.split('-').map(Number);
+                const [endY, endM] = end.split('-').map(Number);
                 for (let y = startY, m = startM; y < endY || (y === endY && m <= endM); m === 12 ? (y++, m = 1) : m++) {
-                    filled.push(y + '-' + String(m).padStart(2, '0'));
+                    keys.push(y + '-' + String(m).padStart(2, '0'));
                 }
-                keys = filled;
             }
             return keys.map((k) => ({ month: k, value: buckets.get(k) || 0 }));
         }
@@ -877,16 +883,19 @@
             }
 
             buckets.forEach((b, i) => {
-                const h = (b.value / max) * plotH;
+                // Months with value 0 still get a thin stub bar, so it is
+                // visible that the month exists but had nothing (and the
+                // stub stays tappable for the caption).
+                const h = Math.max((b.value / max) * plotH, 1.5);
                 const x = padL + i * slot + (slot - barW) / 2;
                 const y = padT + plotH - h;
 
                 const rect = document.createElementNS(svgNS, 'rect');
-                rect.setAttribute('class', 'bar');
+                rect.setAttribute('class', b.value === 0 ? 'bar zero' : 'bar');
                 rect.setAttribute('x', x);
                 rect.setAttribute('y', y);
                 rect.setAttribute('width', barW);
-                rect.setAttribute('height', Math.max(h, b.value > 0 ? 1.5 : 0));
+                rect.setAttribute('height', h);
                 rect.setAttribute('rx', 2);
                 // style.fill (not the fill attribute) so var(--…) resolves
                 rect.style.fill = color;
@@ -919,16 +928,17 @@
 
         function renderCharts(data) {
             const primary = summary.primary_currency || '';
+            const range = monthRange(data);
             renderBarChart(
                 'chart-kwh', 'caption-kwh',
-                monthlyBuckets(data.filter((d) => d.type === 'charging'), (d) => d.energy_kwh || 0),
+                monthlyBuckets(data.filter((d) => d.type === 'charging'), (d) => d.energy_kwh || 0, range),
                 'var(--accent)', 'kWh'
             );
             document.getElementById('chart-cost-title').textContent =
                 'Cost per month' + (primary ? ' (' + primary + ')' : '');
             renderBarChart(
                 'chart-cost', 'caption-cost',
-                monthlyBuckets(data.filter((d) => (d.currency || '') === primary), (d) => d.total_cost || 0),
+                monthlyBuckets(data.filter((d) => (d.currency || '') === primary), (d) => d.total_cost || 0, range),
                 'var(--green)', primary
             );
         }
@@ -1286,10 +1296,6 @@
 
         // Maintenance controls that depend on the email configuration
         function renderEmailControls() {
-            // The "also email during this sync" checkbox only makes sense
-            // when the automatic export is enabled at all.
-            document.getElementById('sync-email-option').hidden = !summary.email_export_enabled;
-
             const skipped = summary.email_skipped_count || 0;
             const btn = document.getElementById('send-skipped-btn');
             const status = document.getElementById('send-skipped-status');
@@ -1334,13 +1340,22 @@
 
         document.getElementById('sync-btn').addEventListener('click', async () => {
             if (!confirm('Download the complete invoice history? This can take a while.')) return;
+            // Emailing is opt-in per run (a full history sync could produce
+            // one mail per invoice) and only asked about when the automatic
+            // email export is enabled at all. Cancel — the safe default —
+            // marks new invoices as skipped; they can still be sent later
+            // via "Email backlog".
+            let sendEmails = false;
+            if (summary.email_export_enabled) {
+                sendEmails = confirm('Also email each new invoice found by this sync?\n\n'
+                    + 'OK: send one email per new invoice.\n'
+                    + 'Cancel (recommended): mark them as skipped — you can send them '
+                    + 'later as a combined export via "Email backlog".');
+            }
             const btn = document.getElementById('sync-btn');
             const status = document.getElementById('sync-status');
             btn.disabled = true;
             status.textContent = 'Starting sync…';
-            // Unchecked (default): new invoices are marked "skipped" instead
-            // of producing one mail each. Irrelevant while export is disabled.
-            const sendEmails = document.getElementById('sync-email-checkbox').checked;
             try {
                 const response = await fetch(API_SYNC + '&skip_email=' + (sendEmails ? 'false' : 'true'), { method: 'POST' });
                 if (response.status === 409) {

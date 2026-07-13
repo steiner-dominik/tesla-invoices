@@ -399,6 +399,31 @@ async def email_invoice(filename: str, to: str | None = None) -> dict[str, str]:
     return {"status": "sent", "to": recipient}
 
 
+@app.get("/api/export.zip")
+async def export_zip() -> Response:
+    """All stored invoice PDFs bundled into a single ZIP for bulk download."""
+    return await asyncio.to_thread(_build_zip)
+
+
+def _build_zip() -> Response:
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    # PDFs are already compressed, so store them as-is instead of wasting
+    # CPU on deflate for a ~0% gain.
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_STORED) as archive:
+        for pdf_file in sorted(config.invoice_path.glob("*.pdf")):
+            if pdf_file.name.startswith("."):
+                continue  # internal state files are never invoices
+            archive.write(pdf_file, arcname=pdf_file.name)
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="tesla_invoices.zip"'},
+    )
+
+
 def _csv_safe(value: Any) -> Any:
     """Neutralize spreadsheet formula injection: text from the Tesla API
     (e.g. site names) must not execute when the CSV is opened in Excel.

@@ -228,6 +228,37 @@ def test_csv_export(client):
     assert '2026-07-01T10:00:00,charging,Car,V1,"Example City, Germany"' in lines[1]
 
 
+def test_zip_export_bundles_all_pdfs(client):
+    import io
+    import zipfile
+
+    (server.config.invoice_path / "a.pdf").write_bytes(b"%PDF-a")
+    (server.config.invoice_path / "b.pdf").write_bytes(b"%PDF-b")
+    # Sidecars, internal state files and foreign suffixes must not leak in
+    (server.config.invoice_path / "a.json").write_text('{"type": "charging"}')
+    (server.config.invoice_path / ".email_export_state.json").write_text("{}")
+    (server.config.invoice_path / "notes.txt").write_text("hello")
+
+    response = client.get("/api/export.zip")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    assert "tesla_invoices.zip" in response.headers["content-disposition"]
+
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        assert sorted(archive.namelist()) == ["a.pdf", "b.pdf"]
+        assert archive.read("a.pdf") == b"%PDF-a"
+
+
+def test_zip_export_without_invoices_is_valid_empty_zip(client):
+    import io
+    import zipfile
+
+    response = client.get("/api/export.zip")
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        assert archive.namelist() == []
+
+
 def test_files_listing_returns_debug_info(client):
     (server.config.invoice_path / "a.json").write_text('{"type": "charging"}')
     (server.config.invoice_path / "invoice.pdf").write_bytes(b"%PDF-fake")

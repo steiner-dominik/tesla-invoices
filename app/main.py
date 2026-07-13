@@ -58,7 +58,10 @@ def main() -> None:
 
     # PORT is only for standalone deployments; the HA app ingress expects
     # the fixed port 9000 (ingress_port in config.yaml).
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "9000")), log_level="info")
+    # access_log=False: the Supervisor watchdog and Docker HEALTHCHECK poll
+    # /health constantly, which would drown the log in one line per request.
+    # The app logs every meaningful event (syncs, downloads, emails) itself.
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "9000")), log_level="info", access_log=False)
 
 
 if __name__ == "__main__":
