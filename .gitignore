@@ -13,4 +13,3 @@ __pycache__/
 .ruff_cache/
 .agents/
 .claude/
-uv.lock

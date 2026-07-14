@@ -1,8 +1,8 @@
 services:
   tesla-invoices:
-    build: .
-    # or use the prebuilt image instead of build:
-    # image: ghcr.io/steiner-dominik/tesla-invoices:latest
+    image: ghcr.io/steiner-dominik/tesla-invoices:latest
+    # or build from source instead of pulling the prebuilt image:
+    # build: .
     container_name: tesla-invoices
     restart: unless-stopped
     ports:

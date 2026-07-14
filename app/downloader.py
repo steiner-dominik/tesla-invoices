@@ -1,4 +1,3 @@
-import json
 import logging
 import re
 from collections.abc import Iterable
@@ -6,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from app import storage
 from app.api import TeslaAPIClient
 from app.config import Config
 
@@ -62,17 +62,9 @@ class InvoiceDownloader:
         """Merge metadata into an existing sidecar file instead of overwriting.
 
         Keys written by others (e.g. the email exporter's ``email_sent``) must
-        survive, and unchanged files are not rewritten to spare flash storage.
+        survive; the locked, atomic merge lives in app.storage.
         """
-        existing: dict = {}
-        if path.exists():
-            try:
-                existing = json.loads(path.read_text())
-            except (ValueError, OSError):
-                logger.warning(f"Could not parse existing metadata {path}, rewriting it")
-        merged = {**existing, **metadata}
-        if merged != existing:
-            path.write_text(json.dumps(merged, indent=4, sort_keys=True))
+        storage.update_json(path, metadata)
 
     def download_invoices(self, months: list[datetime] | None = None) -> None:
         """Download invoices for the given months, or all invoices if ``months`` is None."""
@@ -143,6 +135,12 @@ class InvoiceDownloader:
         failures = 0
         for session in charging_sessions:
             try:
+                session_vin = session.get("vin")
+                if session_vin and session_vin != vin:
+                    # Defense against the GraphQL endpoint ignoring the vin
+                    # filter and returning account-wide history: never save
+                    # another vehicle's invoice under this VIN's file name.
+                    continue
                 session_date = (
                     session.get("unlatchDateTime")
                     or session.get("chargeStopDateTime")
@@ -204,7 +202,7 @@ class InvoiceDownloader:
         # and logs may be pasted into public bug reports.
         logger.info(f"Downloading new charging invoice {filename}")
         content = self.client.get_charging_invoice(invoice_id, vin)
-        local_pdf_path.write_bytes(content)
+        storage.write_bytes_atomic(local_pdf_path, content)
         logger.debug(f"Saved '{local_pdf_path}'")
 
     @staticmethod
@@ -237,6 +235,15 @@ class InvoiceDownloader:
         }
 
     @staticmethod
+    def _is_thousands_separator(cleaned: str, sep: str) -> bool:
+        """A single separator followed by exactly three digits ("1,234" /
+        "1.234") is a thousands separator: invoices print decimals with one
+        or two digits. "0,375" stays a decimal — a thousands group cannot
+        follow a bare zero."""
+        int_part, _, frac_part = cleaned.partition(sep)
+        return len(frac_part) == 3 and int_part.lstrip("-") not in ("", "0")
+
+    @staticmethod
     def _parse_currency_amount(amount_text: str) -> float:
         cleaned = amount_text.replace(" ", "")
         if not cleaned:
@@ -244,14 +251,17 @@ class InvoiceDownloader:
 
         if "," in cleaned and "." in cleaned:
             if cleaned.rfind(",") > cleaned.rfind("."):
-                cleaned = cleaned.replace(".", "").replace(",", ".")
+                cleaned = cleaned.replace(".", "").replace(",", ".")  # 1.234,56
             else:
-                cleaned = cleaned.replace(",", "")
+                cleaned = cleaned.replace(",", "")  # 1,234.56
         elif "," in cleaned:
-            cleaned = cleaned.replace(",", ".")
+            if cleaned.count(",") > 1 or InvoiceDownloader._is_thousands_separator(cleaned, ","):
+                cleaned = cleaned.replace(",", "")  # 1,234,567 / 1,234
+            else:
+                cleaned = cleaned.replace(",", ".")  # 8,50
         elif "." in cleaned:
-            if cleaned.count(".") > 1:
-                cleaned = cleaned.replace(".", "")
+            if cleaned.count(".") > 1 or InvoiceDownloader._is_thousands_separator(cleaned, "."):
+                cleaned = cleaned.replace(".", "")  # 1.234.567 / 1.234
 
         try:
             return float(cleaned)
@@ -307,12 +317,7 @@ class InvoiceDownloader:
 
     @staticmethod
     def _read_json(path: Path) -> dict:
-        if not path.exists():
-            return {}
-        try:
-            return json.loads(path.read_text())
-        except (ValueError, OSError):
-            return {}
+        return storage.read_json(path)
 
     def _subscription_paths(self, stem: str, invoice_id: str) -> tuple[Path, Path, dict]:
         """Pick the file name for a subscription invoice.
@@ -384,7 +389,7 @@ class InvoiceDownloader:
         if not local_pdf_path.exists():
             logger.info(f"Downloading new subscription invoice {invoice['InvoiceFileName']}")
             content = self.client.get_subscription_invoice(invoice["InvoiceId"], vin)
-            local_pdf_path.write_bytes(content)
+            storage.write_bytes_atomic(local_pdf_path, content)
             logger.debug(f"Saved '{local_pdf_path}'")
 
         if not have_cost and local_pdf_path.exists():

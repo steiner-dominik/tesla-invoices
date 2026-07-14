@@ -1,8 +1,36 @@
 import json
 from datetime import datetime
 
+import pytest
+
 from app.downloader import InvoiceDownloader
 from tests.helpers import make_config
+
+
+class TestParseCurrencyAmount:
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("1,234.56", 1234.56),
+            ("1.234,56", 1234.56),
+            ("-1.234,56", -1234.56),
+            ("8,50", 8.5),
+            ("9.99", 9.99),
+            # A single separator followed by exactly three digits is a
+            # thousands separator (invoices print decimals with 1-2 digits)
+            ("1,234", 1234.0),
+            ("1.234", 1234.0),
+            # ... unless the integer part is a bare zero
+            ("0,375", 0.375),
+            ("0.375", 0.375),
+            ("1,234,567", 1234567.0),
+            ("1.234.567", 1234567.0),
+            ("", 0.0),
+            ("abc", 0.0),
+        ],
+    )
+    def test_parse(self, text, expected):
+        assert InvoiceDownloader._parse_currency_amount(text) == expected
 
 
 class TestIsDesiredDate:
@@ -113,6 +141,39 @@ class TestDownloadInvoices:
         assert meta["currency"] == "EUR"
         assert meta["site_name"] == "Example City, Germany"
 
+    def test_sessions_from_other_vehicles_are_ignored(self, tmp_path):
+        # Defense against the GraphQL endpoint returning account-wide history
+        # despite the vin filter: another vehicle's session must neither be
+        # downloaded nor saved under this VIN's file name.
+        config = make_config(tmp_path, enable_subscription_invoice=False)
+
+        def session(vin, day, content_id, filename):
+            return {
+                "vin": vin,
+                "unlatchDateTime": f"2024-02-{day}T10:00:00",
+                "countryCode": "US",
+                "invoices": [{"contentId": content_id, "fileName": filename}],
+            }
+
+        class DummyClient:
+            def get_vehicles(self):
+                return {"VIN123": {"display_name": "My Tesla"}}
+
+            def get_charging_history(self, vin):
+                return [
+                    session("OTHERVIN", "20", "foreign", "foreign.pdf"),
+                    session("VIN123", "21", "own", "own.pdf"),
+                ]
+
+            def get_charging_invoice(self, invoice_id, vin):
+                assert invoice_id == "own", "another vehicle's invoice must not be downloaded"
+                return b"%PDF-1.4"
+
+        InvoiceDownloader(config, DummyClient()).download_invoices()
+
+        assert (config.invoice_path / "tesla_charging_invoice_VIN123_2024-02-21_US_own.pdf").exists()
+        assert not list(config.invoice_path.glob("*foreign*"))
+
     def test_extracts_sessions_from_raw_graphql_payload(self):
         payload = {
             "data": {
@@ -130,7 +191,7 @@ class TestDownloadInvoices:
         }
         assert InvoiceDownloader._extract_charging_sessions(payload) == [{"chargeSessionId": "abc"}]
 
-    def testextract_cost_from_pdf_supports_euro_amounts(self, monkeypatch):
+    def test_extract_cost_from_pdf_supports_euro_amounts(self, monkeypatch):
         class DummyPage:
             def extract_text(self):
                 return "Total due: EUR 1.234,56"
@@ -150,7 +211,7 @@ class TestDownloadInvoices:
         assert amount == 1234.56
         assert currency == "EUR"
 
-    def testextract_cost_from_pdf_supports_symbol_currency(self, monkeypatch):
+    def test_extract_cost_from_pdf_supports_symbol_currency(self, monkeypatch):
         class DummyPage:
             def extract_text(self):
                 return "Amount due: US$ 42.00"
@@ -170,7 +231,7 @@ class TestDownloadInvoices:
         assert amount == 42.0
         assert currency == "USD"
 
-    def testextract_cost_from_pdf_german_subscription_invoice(self, monkeypatch):
+    def test_extract_cost_from_pdf_german_subscription_invoice(self, monkeypatch):
         # Real layout of a Tesla subscription invoice (AT): the grand total is
         # on the "Gesamtbetrag (EUR)" line; the tax rate (20.00) must not win.
         class DummyPage:

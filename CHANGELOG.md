@@ -1,4 +1,65 @@
 <!-- https://developers.home-assistant.io/docs/apps/presentation#keeping-a-changelog -->
+## 2026.07.05
+
+Security- and robustness-focused release, following an external code review.
+
+### Security
+
+- **Cross-site request forgery blocked**: all `POST`/`DELETE` API endpoints
+  now require an `X-Requested-With` header (the dashboard sends it
+  automatically). Without this, any website open in a browser on the same
+  network could trigger syncs, delete files, or **email the stored invoices
+  to an arbitrary address**. API scripts must add the header — see the
+  README's API section.
+- **Email recipients moved into the request body** (`{"to": "…"}` instead of
+  `?to=…`), keeping addresses out of proxy and access logs.
+- **Optional login for standalone deployments**: set
+  `BASIC_AUTH_USER`/`BASIC_AUTH_PASS` to protect the web UI and API with
+  HTTP Basic Auth (`/health` stays open for the container healthcheck). The
+  Home Assistant app is unaffected — ingress already authenticates.
+- **SMTP certificate verification is now explicit**
+  (`ssl.create_default_context()`), instead of relying on library defaults.
+- **The container no longer runs as root**: the entrypoint fixes volume
+  ownership and drops to an unprivileged user before starting the app. If
+  you bind-mount `invoices/`/`secrets/`, their owner changes to the
+  container user on first start.
+- Downloaded files are verified to actually be PDFs (`%PDF` signature), not
+  just to carry a PDF Content-Type.
+
+### Fixed
+
+- **Multi-vehicle accounts**: the charging history request now passes the
+  vehicle's VIN as a GraphQL variable and ignores sessions of other
+  vehicles. Previously, accounts with several vehicles could download every
+  invoice once per vehicle, filed under the wrong VIN.
+- **Amount parsing**: English-format totals without decimals (`1,234`) were
+  read as `1.234`. A single separator followed by exactly three digits is
+  now treated as a thousands separator.
+- **No more duplicate emails after crashes or concurrent writes**: all
+  metadata files are written atomically (temp file + rename) under a lock;
+  the PDF re-scan no longer runs concurrently with a sync (it answers
+  HTTP 409 while one is running).
+- Deleting a PDF in the Files tab now deletes its metadata entry too, so no
+  ghost rows remain in the dashboard and CSV export.
+- The "Send skipped invoices" counter no longer counts metadata files whose
+  PDF is missing.
+- Date-only invoices (subscriptions) no longer show a made-up "00:00" time.
+- Retry give-up errors now report the actual last error instead of always
+  claiming "connection errors".
+
+### Changed
+
+- **In-page dialogs** replace browser `prompt()`/`confirm()` popups, which
+  can silently fail inside embedded webviews (e.g. the Home Assistant
+  companion apps) and make buttons appear dead.
+- **ZIP export streams from disk** instead of assembling the whole archive
+  in memory — large archives no longer risk out-of-memory on small boxes.
+- The dashboard pauses its background polling while its tab is hidden.
+- The project is now licensed under the **MIT License**.
+- Dependencies are fully pinned via a committed `uv.lock`;
+  `requirements.txt` (used for the Docker image) is exported from it and
+  CI verifies they stay in sync.
+
 ## 2026.07.04
 
 - **Aligned chart timelines**: the *Energy per month* and *Cost per month*

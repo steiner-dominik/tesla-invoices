@@ -255,8 +255,12 @@ class TokenManager:
         # rotated automatically), but an access token alone also works for
         # standalone users who prefer a short-lived credential — until it
         # expires. At least one of the two must be present.
+        previous_access_token = self.access_token
         self.access_token = self._determine_best_token("access", required=False)
         self.refresh_token = self._determine_best_token("refresh", required=False)
+        if self.access_token != previous_access_token:
+            # A new token deserves its own expiry warning.
+            self._expiry_warned = False
         if not self.access_token and not self.refresh_token:
             raise TeslaAuthError(
                 "No Tesla token configured. Provide a refresh token (recommended), "
@@ -372,6 +376,7 @@ class TeslaAPIClient:
         logger.debug(f"{method.upper()} Request to url: {url}")
 
         auth_retried = False
+        last_error: Exception | None = None
         for attempt in range(MAX_RETRIES):
             # Rebuilt every attempt: a forced refresh below replaces the token.
             headers = {
@@ -392,10 +397,12 @@ class TeslaAPIClient:
                 logger.warning(
                     f"Connection to Tesla was interrupted, retrying (attempt {attempt + 1} of {MAX_RETRIES}): {e}"
                 )
+                last_error = e
                 self.sess.close()
                 time.sleep(attempt * 3 + 1)
             except requests.exceptions.HTTPError as e:
                 status = e.response.status_code if e.response is not None else None
+                last_error = e
                 # Tesla rejects some tokens before their exp (revoked, or
                 # poisoned by a refresh it didn't like); a forced refresh
                 # recovers instead of trusting the token until it expires.
@@ -411,7 +418,7 @@ class TeslaAPIClient:
             except requests.exceptions.RequestException as e:
                 raise TeslaAPIError(f"Request failed: {e}") from e
         else:
-            raise TeslaAPIError(f"Giving up after {MAX_RETRIES} tries due to repeated connection errors")
+            raise TeslaAPIError(f"Giving up after {MAX_RETRIES} tries, last error: {last_error}")
 
         content_type = result.headers.get("Content-Type", "")
         if "application/json" in content_type:
@@ -456,6 +463,11 @@ class TeslaAPIClient:
                     "sortBy": "start_datetime",
                     "sortOrder": "DESC",
                     "pageNumber": page,
+                    # Without this GraphQL variable the gateway returns the
+                    # account-wide history (the vin in the URL params is not
+                    # enough), which would duplicate every invoice once per
+                    # vehicle on multi-vehicle accounts.
+                    "vin": vin,
                 },
                 "operationName": "getChargingHistoryV2",
             }
@@ -510,7 +522,13 @@ class TeslaAPIClient:
         that to disk would corrupt the invoice, so fail the single item."""
         if not isinstance(response, (bytes, bytearray)):
             raise TeslaAPIError(f"Expected PDF content for {what}, got {type(response).__name__}")
-        return bytes(response)
+        content = bytes(response)
+        # The %PDF signature must appear near the start (the spec allows a
+        # small amount of leading junk) — a PDF Content-Type on an HTML error
+        # page must not slip through.
+        if b"%PDF" not in content[:1024]:
+            raise TeslaAPIError(f"Response for {what} is not a PDF (missing %PDF signature)")
+        return content
 
     def get_charging_invoice(self, invoice_id: str, vin: str) -> bytes:
         url = f"https://ownership.tesla.com/mobile-app/charging/invoice/{invoice_id}"

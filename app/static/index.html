@@ -429,6 +429,33 @@
         .modal-head .actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
         .modal-body { flex: 1; background: #525659; min-height: 0; }
         .modal-body iframe { width: 100%; height: 100%; border: none; }
+        /* Generic in-page dialog: native prompt()/confirm() are unreliable in
+           embedded webviews (HA companion app) where they can silently return
+           null and make buttons appear dead. */
+        .dialog-box { width: min(26rem, 100%); height: auto; max-height: 90vh; }
+        .dialog-body { padding: 1rem 0.9rem; font-size: 0.875rem; }
+        .dialog-body p { margin: 0 0 0.75rem; white-space: pre-line; }
+        .dialog-body p:last-child { margin-bottom: 0; }
+        .dialog-body input[type="email"] {
+            width: 100%;
+            padding: 0.45rem 0.6rem;
+            border: 1px solid var(--border);
+            border-radius: 0.35rem;
+            font-size: 0.85rem;
+            background: var(--card);
+            color: var(--text);
+        }
+        .dialog-body label { display: flex; gap: 0.5rem; align-items: baseline; margin-top: 0.6rem; font-size: 0.85rem; }
+        /* display:flex would otherwise defeat the hidden attribute */
+        .dialog-body [hidden] { display: none; }
+        .dialog-error { color: var(--red); font-size: 0.8rem; margin: 0.5rem 0 0; }
+        .dialog-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.5rem;
+            padding: 0.75rem 0.9rem;
+            border-top: 1px solid var(--border);
+        }
     </style>
 </head>
 <body>
@@ -602,6 +629,25 @@
         </div>
     </div>
 
+    <div id="app-dialog" class="modal" hidden>
+        <div class="modal-box dialog-box">
+            <div class="modal-head"><span class="title" id="dialog-title"></span></div>
+            <div class="dialog-body">
+                <p id="dialog-message"></p>
+                <input id="dialog-input" type="email" hidden>
+                <label id="dialog-check-wrap" hidden>
+                    <input type="checkbox" id="dialog-check">
+                    <span id="dialog-check-label"></span>
+                </label>
+                <p id="dialog-error" class="dialog-error" hidden></p>
+            </div>
+            <div class="dialog-actions">
+                <button id="dialog-cancel" class="btn" type="button">Cancel</button>
+                <button id="dialog-ok" class="btn primary" type="button">OK</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         // NOTE: all URLs are RELATIVE (no leading "/") so they stay inside the
         // Home Assistant ingress path prefix instead of escaping to the HA root.
@@ -646,6 +692,85 @@
             try { return localStorage.getItem(THEME_KEY) || 'auto'; } catch (e) { return 'auto'; }
         })());
 
+        // ---------- API + dialogs ----------
+
+        // Custom header on every mutating request: the backend rejects
+        // POST/DELETE without it, which blocks cross-site request forgery
+        // (HTML forms cannot set custom headers).
+        function apiFetch(url, options = {}) {
+            options.headers = { 'X-Requested-With': 'tesla-invoices', ...(options.headers || {}) };
+            return fetch(url, options);
+        }
+
+        // In-page replacement for prompt()/confirm()/alert(): the native
+        // dialogs are unreliable in embedded webviews (HA companion app),
+        // where they can silently return null and make buttons appear dead.
+        // Resolves to { value, checked } on OK, or null on cancel.
+        function showDialog({ title, message, okLabel = 'OK', cancelLabel = 'Cancel', hideCancel = false,
+                              input = null, checkbox = null, validate = null }) {
+            const modal = document.getElementById('app-dialog');
+            const inputEl = document.getElementById('dialog-input');
+            const checkWrap = document.getElementById('dialog-check-wrap');
+            const checkEl = document.getElementById('dialog-check');
+            const errorEl = document.getElementById('dialog-error');
+            const okBtn = document.getElementById('dialog-ok');
+            const cancelBtn = document.getElementById('dialog-cancel');
+
+            document.getElementById('dialog-title').textContent = title || '';
+            document.getElementById('dialog-message').textContent = message || '';
+            inputEl.hidden = !input;
+            inputEl.value = input ? (input.value || '') : '';
+            inputEl.placeholder = input ? (input.placeholder || '') : '';
+            checkWrap.hidden = !checkbox;
+            checkEl.checked = !!(checkbox && checkbox.checked);
+            document.getElementById('dialog-check-label').textContent = checkbox ? checkbox.label : '';
+            errorEl.hidden = true;
+            okBtn.textContent = okLabel;
+            cancelBtn.textContent = cancelLabel;
+            cancelBtn.hidden = hideCancel;
+            modal.hidden = false;
+            if (input) inputEl.focus(); else okBtn.focus();
+
+            return new Promise((resolve) => {
+                function close(result) {
+                    modal.hidden = true;
+                    okBtn.removeEventListener('click', onOk);
+                    cancelBtn.removeEventListener('click', onCancel);
+                    modal.removeEventListener('click', onBackdrop);
+                    document.removeEventListener('keydown', onKey);
+                    resolve(result);
+                }
+                function onOk() {
+                    const value = inputEl.value.trim();
+                    if (validate) {
+                        const problem = validate(value);
+                        if (problem) {
+                            errorEl.textContent = problem;
+                            errorEl.hidden = false;
+                            return;
+                        }
+                    }
+                    close({ value, checked: checkEl.checked });
+                }
+                function onCancel() { close(null); }
+                function onBackdrop(e) { if (e.target === modal) close(null); }
+                function onKey(e) {
+                    if (e.key === 'Escape') close(null);
+                    else if (e.key === 'Enter') onOk();
+                }
+                okBtn.addEventListener('click', onOk);
+                cancelBtn.addEventListener('click', onCancel);
+                modal.addEventListener('click', onBackdrop);
+                document.addEventListener('keydown', onKey);
+            });
+        }
+
+        function showError(message) {
+            return showDialog({ title: 'Error', message, okLabel: 'OK', hideCancel: true });
+        }
+
+        const validEmail = (v) => v.includes('@') ? '' : 'Please enter a valid email address.';
+
         let allData = [];
         let summary = {};
         let syncState = {};
@@ -688,6 +813,9 @@
             if (!value) return '-';
             const raw = String(value);
             if (!raw.includes('T') && !raw.includes(':')) return raw;
+            // Exactly-midnight timestamps are date-only invoices
+            // (subscriptions) — don't show a made-up "00:00" time.
+            if (/T00:00:00(?:\.0+)?$/.test(raw)) return raw.slice(0, 10);
             const d = new Date(raw);
             if (isNaN(d)) return raw;
             const pad = (n) => String(n).padStart(2, '0');
@@ -1080,27 +1208,30 @@
 
         async function emailInvoice(filename, btn) {
             // Recipient is editable per send; config's email.to is the default
-            const to = prompt('Send "' + filename + '" by email to:', summary.email_default_to || '');
-            if (to === null) return; // cancelled
-            const recipient = to.trim();
-            if (!recipient || !recipient.includes('@')) {
-                alert('Please enter a valid email address.');
-                return;
-            }
+            const result = await showDialog({
+                title: 'Email invoice',
+                message: 'Send "' + filename + '" by email to:',
+                okLabel: 'Send',
+                input: { value: summary.email_default_to || '', placeholder: 'recipient@example.com' },
+                validate: validEmail,
+            });
+            if (result === null) return; // cancelled
             btn.disabled = true;
             const original = btn.textContent;
             btn.textContent = 'Sending…';
             try {
-                const response = await fetch(
-                    API_EMAIL + encodeURIComponent(filename) + '?to=' + encodeURIComponent(recipient),
-                    { method: 'POST' }
-                );
+                // Recipient in the body, not the query string (proxy logs)
+                const response = await apiFetch(API_EMAIL + encodeURIComponent(filename), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ to: result.value }),
+                });
                 const body = await response.json().catch(() => ({}));
                 if (!response.ok) throw new Error(body.detail || ('HTTP ' + response.status));
                 btn.textContent = 'Sent ✓';
             } catch (error) {
                 console.error('Failed to send email:', error);
-                alert('Sending failed: ' + error.message);
+                await showError('Sending failed: ' + error.message);
                 btn.textContent = original;
                 btn.disabled = false;
             }
@@ -1314,18 +1445,23 @@
         document.getElementById('send-skipped-btn').addEventListener('click', async () => {
             const btn = document.getElementById('send-skipped-btn');
             const status = document.getElementById('send-skipped-status');
-            const to = prompt('Send all skipped invoices (combined) by email to:', summary.email_default_to || '');
-            if (to === null) return; // cancelled
-            const recipient = to.trim();
-            if (!recipient || !recipient.includes('@')) {
-                alert('Please enter a valid email address.');
-                return;
-            }
+            const result = await showDialog({
+                title: 'Email backlog',
+                message: 'Send all skipped invoices (combined) by email to:',
+                okLabel: 'Send',
+                input: { value: summary.email_default_to || '', placeholder: 'recipient@example.com' },
+                validate: validEmail,
+            });
+            if (result === null) return; // cancelled
             btn.disabled = true;
             btn.dataset.busy = '1';
             status.textContent = 'Sending…';
             try {
-                const response = await fetch(API_SEND_SKIPPED + '?to=' + encodeURIComponent(recipient), { method: 'POST' });
+                const response = await apiFetch(API_SEND_SKIPPED, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ to: result.value }),
+                });
                 const body = await response.json().catch(() => ({}));
                 if (!response.ok) throw new Error(body.detail || ('HTTP ' + response.status));
                 status.textContent = 'Sent ' + (body.sent || 0) + ' invoice(s) in ' + (body.emails || 0) + ' email(s).';
@@ -1339,25 +1475,28 @@
         });
 
         document.getElementById('sync-btn').addEventListener('click', async () => {
-            if (!confirm('Download the complete invoice history? This can take a while.')) return;
             // Emailing is opt-in per run (a full history sync could produce
-            // one mail per invoice) and only asked about when the automatic
-            // email export is enabled at all. Cancel — the safe default —
-            // marks new invoices as skipped; they can still be sent later
-            // via "Email backlog".
-            let sendEmails = false;
-            if (summary.email_export_enabled) {
-                sendEmails = confirm('Also email each new invoice found by this sync?\n\n'
-                    + 'OK: send one email per new invoice.\n'
-                    + 'Cancel (recommended): mark them as skipped — you can send them '
-                    + 'later as a combined export via "Email backlog".');
-            }
+            // one mail per invoice); the checkbox only appears when the
+            // automatic email export is enabled at all. Unchecked — the safe
+            // default — marks new invoices as skipped; they can still be
+            // sent later via "Email backlog".
+            const result = await showDialog({
+                title: 'Sync all history',
+                message: 'Download the complete invoice history? This can take a while.',
+                okLabel: 'Start sync',
+                checkbox: summary.email_export_enabled
+                    ? { label: 'Also email each new invoice found by this sync '
+                        + '(unchecked: mark them as skipped, sendable later via "Email backlog")', checked: false }
+                    : null,
+            });
+            if (result === null) return; // cancelled
+            const sendEmails = !!result.checked;
             const btn = document.getElementById('sync-btn');
             const status = document.getElementById('sync-status');
             btn.disabled = true;
             status.textContent = 'Starting sync…';
             try {
-                const response = await fetch(API_SYNC + '&skip_email=' + (sendEmails ? 'false' : 'true'), { method: 'POST' });
+                const response = await apiFetch(API_SYNC + '&skip_email=' + (sendEmails ? 'false' : 'true'), { method: 'POST' });
                 if (response.status === 409) {
                     status.textContent = 'A sync is already running.';
                 } else if (!response.ok) {
@@ -1379,7 +1518,11 @@
             btn.disabled = true;
             status.textContent = 'Re-scanning…';
             try {
-                const response = await fetch(API_RESCAN, { method: 'POST' });
+                const response = await apiFetch(API_RESCAN, { method: 'POST' });
+                if (response.status === 409) {
+                    status.textContent = 'A sync is running — try again when it has finished.';
+                    return;
+                }
                 if (!response.ok) throw new Error('HTTP ' + response.status);
                 const result = await response.json();
                 status.textContent = 'Updated ' + (result.updated || 0) + ' file(s).';
@@ -1394,9 +1537,16 @@
         });
 
         async function deleteFile(filename) {
-            if (!confirm('Delete "' + filename + '"?\n\nNote: a deleted PDF will be downloaded again on the next sync as long as its invoice exists at Tesla.')) return;
+            const isMetadata = filename.toLowerCase().endsWith('.json');
+            const message = isMetadata
+                ? 'Delete "' + filename + '"?\n\nThis is a metadata file: without it the invoice looks '
+                    + 'brand new again — if automatic email export is enabled, it may be emailed a second time.'
+                : 'Delete "' + filename + '"?\n\nIts metadata entry is deleted too, and the PDF will be '
+                    + 'downloaded again on the next sync as long as its invoice exists at Tesla.';
+            const result = await showDialog({ title: 'Delete file', message, okLabel: 'Delete' });
+            if (result === null) return; // cancelled
             try {
-                const response = await fetch('api/files/' + encodeURIComponent(filename), { method: 'DELETE' });
+                const response = await apiFetch('api/files/' + encodeURIComponent(filename), { method: 'DELETE' });
                 if (!response.ok) {
                     const body = await response.json().catch(() => ({}));
                     throw new Error(body.detail || ('HTTP ' + response.status));
@@ -1405,17 +1555,22 @@
                 loadData(); // analytics change when a metadata sidecar is removed
             } catch (error) {
                 console.error('Failed to delete file:', error);
-                alert('Deleting failed: ' + error.message);
+                await showError('Deleting failed: ' + error.message);
             }
         }
 
         document.getElementById('files-refresh-btn').addEventListener('click', loadFiles);
         document.addEventListener('DOMContentLoaded', loadData);
-        // Refresh periodically so a running sync's results show up
+        // Refresh periodically so a running sync's results show up — but not
+        // from hidden tabs (no point hammering the API in the background).
         setInterval(() => {
+            if (document.hidden) return;
             loadData();
             if (filesTabVisible()) loadFiles();
         }, 60000);
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) loadData();
+        });
     </script>
 </body>
 </html>

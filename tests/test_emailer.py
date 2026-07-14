@@ -19,7 +19,7 @@ def _install_dummy_smtp(monkeypatch, sent_messages):
         def ehlo(self):
             pass
 
-        def starttls(self):
+        def starttls(self, context=None):
             pass
 
         def login(self, *args):
@@ -105,7 +105,7 @@ def test_send_single_sends_and_marks_metadata(tmp_path, monkeypatch):
         def ehlo(self):
             pass
 
-        def starttls(self):
+        def starttls(self, context=None):
             pass
 
         def login(self, *args):
@@ -141,7 +141,7 @@ def test_port_465_uses_implicit_tls(tmp_path, monkeypatch):
         def __exit__(self, *args):
             return False
 
-        def starttls(self):
+        def starttls(self, context=None):
             raise AssertionError("STARTTLS must not be used on port 465")
 
         def login(self, *args):
@@ -180,7 +180,7 @@ def test_send_single_custom_recipient(tmp_path, monkeypatch):
         def ehlo(self):
             pass
 
-        def starttls(self):
+        def starttls(self, context=None):
             pass
 
         def login(self, *args):

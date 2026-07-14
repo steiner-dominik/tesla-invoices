@@ -1,11 +1,12 @@
-import json
 import logging
 import smtplib
+import ssl
 import time
 from datetime import datetime
 from email.message import EmailMessage
 from pathlib import Path
 
+from app import storage
 from app.config import Config
 
 logger = logging.getLogger(__name__)
@@ -56,30 +57,18 @@ class EmailExporter:
 
     @staticmethod
     def _read_metadata(path: Path) -> dict:
-        if path.exists() and path.stat().st_size > 0:
-            try:
-                return json.loads(path.read_text())
-            except (ValueError, OSError):
-                logger.warning(f"Could not read metadata {path.name}, treating invoice as not sent")
-        return {}
-
-    @staticmethod
-    def _write_metadata(path: Path, metadata: dict) -> None:
-        path.write_text(json.dumps(metadata, indent=4, sort_keys=True))
+        return storage.read_json(path)
 
     @property
     def _state_path(self) -> Path:
         return self.config.invoice_path / STATE_FILENAME
 
     def _load_state(self) -> dict:
-        try:
-            return json.loads(self._state_path.read_text())
-        except (OSError, ValueError):
-            return {}
+        return storage.read_json(self._state_path)
 
     def _save_state(self, state: dict) -> None:
         try:
-            self._state_path.write_text(json.dumps(state))
+            storage.write_json_atomic(self._state_path, state)
         except OSError as e:
             logger.warning(f"Could not persist email export state: {e}")
 
@@ -106,10 +95,7 @@ class EmailExporter:
         now = int(time.time())
         marked = 0
         for pdf in self._pending_invoices():
-            metadata_path = pdf.with_suffix(".json")
-            metadata = self._read_metadata(metadata_path)
-            metadata["email_skipped"] = now
-            self._write_metadata(metadata_path, metadata)
+            storage.update_json(pdf.with_suffix(".json"), {"email_skipped": now})
             marked += 1
         return marked
 
@@ -214,16 +200,20 @@ class EmailExporter:
     # ---------- sending ----------
 
     def _connect(self) -> smtplib.SMTP:
+        # Explicit context: create_default_context() verifies the server
+        # certificate and hostname; smtplib's implicit default has not always
+        # done so, and this channel carries credentials and invoices.
+        context = ssl.create_default_context()
         if self.config.email_server_port == 465:
             # Port 465 speaks implicit TLS from the first byte; STARTTLS
             # would hang against it.
             smtp: smtplib.SMTP = smtplib.SMTP_SSL(
-                self.config.email_server, self.config.email_server_port, timeout=SMTP_TIMEOUT
+                self.config.email_server, self.config.email_server_port, timeout=SMTP_TIMEOUT, context=context
             )
         else:
             smtp = smtplib.SMTP(self.config.email_server, self.config.email_server_port, timeout=SMTP_TIMEOUT)
             smtp.ehlo()
-            smtp.starttls()
+            smtp.starttls(context=context)
         if self.config.email_user:
             smtp.login(self.config.email_user, self.config.email_pass)
         return smtp
@@ -248,10 +238,8 @@ class EmailExporter:
 
         # No recipient address in the log — logs may end up in bug reports.
         logger.info(f"Sent invoice {pdf.name} by email")
-        metadata["email_sent"] = int(time.time())
         # A manual send of a previously skipped invoice resolves the skip.
-        metadata.pop("email_skipped", None)
-        self._write_metadata(metadata_path, metadata)
+        storage.update_json(metadata_path, {"email_sent": int(time.time())}, remove=("email_skipped",))
 
     def send_pending(self, skip: bool = False) -> None:
         """Auto-export after a sync. ``skip=True`` (bulk sync with sending
@@ -359,11 +347,7 @@ class EmailExporter:
 
                 now = int(time.time())
                 for pdf in batch:
-                    metadata_path = pdf.with_suffix(".json")
-                    metadata = self._read_metadata(metadata_path)
-                    metadata.pop("email_skipped", None)
-                    metadata["email_sent"] = now
-                    self._write_metadata(metadata_path, metadata)
+                    storage.update_json(pdf.with_suffix(".json"), {"email_sent": now}, remove=("email_skipped",))
                 sent += len(batch)
                 logger.info(f"Sent combined export email {index}/{len(batches)} with {len(batch)} invoice(s)")
 

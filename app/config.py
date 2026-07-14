@@ -42,6 +42,11 @@ class Config:
     email_user: str = ""
     email_pass: str = ""
 
+    # Optional login for the standalone web UI (BASIC_AUTH_USER/_PASS).
+    # The HA app never sets these: ingress already authenticates.
+    basic_auth_user: str = ""
+    basic_auth_pass: str = ""
+
     def __post_init__(self) -> None:
         if self.polling_interval < 1:
             raise ConfigurationError(f"polling_interval must be >= 1 minute, got {self.polling_interval}")
@@ -49,6 +54,8 @@ class Config:
             raise ConfigurationError(
                 "enable_email_export is set, but email settings (from/to/mailserver) are incomplete"
             )
+        if bool(self.basic_auth_user) != bool(self.basic_auth_pass):
+            raise ConfigurationError("BASIC_AUTH_USER and BASIC_AUTH_PASS must be set together")
 
     @classmethod
     def from_ha(cls, options_path: Path = HA_OPTIONS_PATH) -> Config:
@@ -108,6 +115,8 @@ class Config:
             email_server_port=_to_int(os.environ.get("EMAIL_SERVER_PORT", "587"), "EMAIL_SERVER_PORT"),
             email_user=os.environ.get("EMAIL_USER", ""),
             email_pass=os.environ.get("EMAIL_PASS", ""),
+            basic_auth_user=os.environ.get("BASIC_AUTH_USER", ""),
+            basic_auth_pass=os.environ.get("BASIC_AUTH_PASS", ""),
         )
 
     @classmethod

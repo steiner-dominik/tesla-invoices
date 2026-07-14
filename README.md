@@ -79,8 +79,9 @@ docker run -d --name tesla-invoices \
   ghcr.io/steiner-dominik/tesla-invoices:latest
 ```
 
-> ⚠️ The web UI has **no authentication** — only expose port 9000 on a trusted
-> network (or put it behind your reverse proxy's auth).
+> ⚠️ The web UI has **no authentication by default** — only expose port 9000 on
+> a trusted network, set `BASIC_AUTH_USER`/`BASIC_AUTH_PASS` to require a
+> login, or put it behind your reverse proxy's auth.
 
 ## 🏠 Home Assistant app
 
@@ -108,6 +109,7 @@ All settings are environment variables (see [docker.env.example](docker.env.exam
 | `EMAIL_FROM` / `EMAIL_TO` | – | Sender / recipient for the email export |
 | `EMAIL_SERVER` / `EMAIL_SERVER_PORT` | – / `587` | SMTP server; port 587 = STARTTLS, 465 = implicit TLS |
 | `EMAIL_USER` / `EMAIL_PASS` | – | SMTP credentials (leave empty for no login) |
+| `BASIC_AUTH_USER` / `BASIC_AUTH_PASS` | – | Optional web UI / API login (HTTP Basic Auth); set both or neither. `/health` stays open for the container healthcheck |
 | `PORT` | `9000` | Web UI port |
 | `INVOICE_PATH` | `/opt/tesla-invoices/invoices` | Where PDFs and metadata are stored |
 | `ACCESS_TOKEN_PATH` / `REFRESH_TOKEN_PATH` | `/opt/tesla-invoices/secrets/…` | Token file locations |
@@ -134,20 +136,34 @@ The dashboard is a thin client over a small REST API you can use directly:
 | `GET /api/export.csv` | CSV export of all invoices |
 | `GET /api/export.zip` | All invoice PDFs bundled into one ZIP |
 | `GET /api/download/{filename}?inline=true` | Download / view an invoice PDF |
-| `POST /api/email/{filename}?to=…` | Email one invoice to any recipient |
-| `POST /api/email/send-skipped?to=…` | Email all skipped invoices as a combined, batched export |
+| `POST /api/email/{filename}` | Email one invoice; JSON body `{"to": "…"}` overrides the configured recipient |
+| `POST /api/email/send-skipped` | Email all skipped invoices as a combined, batched export (JSON body `{"to": "…"}` optional) |
 | `GET /api/files` | List stored files with previews (Files tab) |
-| `DELETE /api/files/{filename}` | Delete one stored PDF / metadata file |
-| `POST /api/files/rescan` | Re-extract cost/currency from stored PDFs |
+| `DELETE /api/files/{filename}` | Delete one stored PDF (its metadata file is deleted too) |
+| `POST /api/files/rescan` | Re-extract cost/currency from stored PDFs (409 while a sync runs) |
 | `GET /health` | Health check (used by the HA watchdog and Docker) |
+
+> 🔐 **CSRF protection:** every `POST`/`DELETE` request must carry an
+> `X-Requested-With` header (any value). Without it the API answers 403 —
+> this blocks cross-site request forgery from malicious websites. Example:
+>
+> ```bash
+> curl -X POST -H 'X-Requested-With: cli' 'http://localhost:9000/api/sync?month=2026-06'
+> ```
 
 ## 🛠️ Development
 
+Dependencies are managed with [uv](https://docs.astral.sh/uv/); `uv.lock`
+pins everything, and `requirements.txt` (used by the Docker image) is
+exported from it — regenerate both together when changing dependencies:
+
 ```bash
-python -m venv venv && . venv/bin/activate
-pip install -r requirements.txt pytest httpx ruff
-ruff check .
-pytest
+uv sync            # creates .venv with all (dev) dependencies
+uv run ruff check .
+uv run pytest
+
+# after editing dependencies in pyproject.toml:
+uv lock && uv export --no-dev --no-hashes --no-emit-project --output-file requirements.txt
 ```
 
 The layout is deliberately small: [app/api.py](app/api.py) (Tesla API client + auth),
@@ -176,6 +192,10 @@ Sauerwein-Schlosser ([aSauerwein/tesla-invoices](https://github.com/aSauerwein/t
 - 2026: Refactored the complete codebase to improve maintainability and scalability. Added dashboard feature. (Dominik Steiner w/ Claude Fable 5)
 - 2026: Fixed broken Tesla Owner-API endpoints. (Dominik Steiner)
 
+
+## 📄 License
+
+[MIT](LICENSE)
 
 ## ⚖️ Disclaimer
 

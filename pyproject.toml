@@ -1,3 +1,29 @@
+[project]
+name = "tesla-invoices"
+# Releases are versioned by their git tag (CalVer, e.g. 2026.07.05, mirrored
+# in the HA repository's config.yaml); this package version is intentionally
+# meaningless so there is no second place to bump.
+version = "0.0.0"
+description = "Download Tesla charging and subscription invoices, with analytics dashboard and email export"
+license = "MIT"
+requires-python = ">=3.14"
+dependencies = [
+    "requests==2.34.2",
+    "urllib3==2.7.0",
+    # Auth only: Tesla rejects tokens refreshed with a non-browser TLS fingerprint
+    "curl_cffi==0.15.0",
+    "fastapi==0.139.0",
+    "uvicorn==0.51.0",
+    "pypdf==6.14.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "httpx>=0.27",
+    "ruff>=0.15",
+]
+
 [tool.ruff]
 line-length = 119
 target-version = "py314"

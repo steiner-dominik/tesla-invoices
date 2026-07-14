@@ -237,4 +237,51 @@ class TestAPIClient:
 
         with pytest.raises(TeslaAPIError):
             client._expect_pdf({"error": "not found"}, "charging invoice x")
+        # A PDF Content-Type with an HTML error body must not reach the disk
+        with pytest.raises(TeslaAPIError):
+            client._expect_pdf(b"<html>Access Denied</html>", "charging invoice x")
         assert client._expect_pdf(b"%PDF-1.4", "charging invoice x") == b"%PDF-1.4"
+
+    def test_charging_history_paginates_and_filters_by_vin(self, tmp_path, monkeypatch):
+        config = make_config(tmp_path)
+        client = TeslaAPIClient(config, TokenManager(config))
+
+        payloads = []
+
+        def fake_base_req(url, method="get", json_data=None, params=None, extra_headers=None):
+            payloads.append(json_data)
+            page = json_data["variables"]["pageNumber"]
+            return {
+                "data": {
+                    "me": {
+                        "charging": {
+                            "historyV2": {
+                                "data": [{"chargeSessionId": f"session-{page}"}],
+                                "totalResults": 2,
+                                "hasMoreData": page < 2,
+                                "pageNumber": page,
+                            }
+                        }
+                    }
+                }
+            }
+
+        monkeypatch.setattr(client, "base_req", fake_base_req)
+
+        sessions = client.get_charging_history("VIN123")
+
+        assert [s["chargeSessionId"] for s in sessions] == ["session-1", "session-2"]
+        assert [p["variables"]["pageNumber"] for p in payloads] == [1, 2]
+        # Without the vin variable the gateway returns account-wide history,
+        # duplicating every invoice once per vehicle on multi-vehicle accounts
+        assert all(p["variables"]["vin"] == "VIN123" for p in payloads)
+
+    def test_charging_history_reports_graphql_errors(self, tmp_path, monkeypatch):
+        config = make_config(tmp_path)
+        client = TeslaAPIClient(config, TokenManager(config))
+        monkeypatch.setattr(
+            client, "base_req", lambda *a, **kw: {"errors": [{"message": "boom"}], "data": None}
+        )
+
+        with pytest.raises(TeslaAPIError):
+            client.get_charging_history("VIN123")

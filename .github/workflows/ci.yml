@@ -13,13 +13,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.14'
-      - name: Install dependencies
-        run: pip install -r requirements.txt pytest httpx ruff
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Install dependencies (locked)
+        # --locked fails if uv.lock is out of sync with pyproject.toml,
+        # so dependency changes can never slip in unpinned.
+        run: uv sync --locked
+      - name: Verify requirements.txt matches the lockfile
+        # The Docker image installs from requirements.txt; it must be the
+        # exported lockfile, not a hand-edited file. Comment lines are
+        # ignored: the generated header embeds the output file name.
+        run: |
+          uv export --no-dev --no-hashes --no-emit-project --output-file /tmp/requirements.txt
+          diff <(grep -v '^#' /tmp/requirements.txt) <(grep -v '^#' requirements.txt)
       - name: Lint
-        run: ruff check .
+        run: uv run ruff check .
       - name: Test
-        run: pytest
+        run: uv run pytest

@@ -1,16 +1,22 @@
 import asyncio
+import base64
+import binascii
 import json
 import logging
+import os
 import random
+import secrets
 from contextlib import asynccontextmanager, suppress
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, Response
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse, Response
+from pydantic import BaseModel
+from starlette.background import BackgroundTask
 
+from app import storage
 from app.api import TeslaAPIClient, TokenManager
 from app.config import Config
 from app.downloader import METADATA_VERSION, InvoiceDownloader
@@ -131,7 +137,50 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Tesla Invoices", lifespan=lifespan)
 
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+# The exact value is irrelevant — HTML forms cannot set custom headers, and a
+# cross-origin script could only add one after a CORS preflight, which this
+# app never answers. Its mere presence therefore proves a same-origin caller.
+CSRF_HEADER = "x-requested-with"
+
+
+@app.middleware("http")
+async def enforce_csrf_header(request: Request, call_next):
+    """Reject cross-site mutations: without this, any website open in a
+    browser on the same network could trigger syncs, delete files, or mail
+    the stored invoices to an arbitrary address via a simple form POST."""
+    if request.method not in ("GET", "HEAD", "OPTIONS") and CSRF_HEADER not in request.headers:
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "Missing X-Requested-With header — cross-site requests are rejected"},
+        )
+    return await call_next(request)
+
+
+def _basic_auth_ok(header: str) -> bool:
+    scheme, _, encoded = header.partition(" ")
+    if scheme.lower() != "basic":
+        return False
+    try:
+        user, _, password = base64.b64decode(encoded.strip()).decode().partition(":")
+    except (binascii.Error, UnicodeDecodeError):
+        return False
+    # compare_digest on both parts: no timing oracle for the user name either
+    user_ok = secrets.compare_digest(user, config.basic_auth_user)
+    return secrets.compare_digest(password, config.basic_auth_pass) and user_ok
+
+
+# Registered after (= wrapped around) the CSRF middleware, so unauthenticated
+# requests are answered with 401 before anything else runs.
+@app.middleware("http")
+async def enforce_basic_auth(request: Request, call_next):
+    """Optional login for standalone deployments (BASIC_AUTH_USER/_PASS).
+    /health stays open: the Docker HEALTHCHECK and the HA watchdog poll it
+    without credentials. The HA app never sets these options — ingress
+    already authenticates."""
+    if config.basic_auth_user and request.url.path != "/health":
+        if not _basic_auth_ok(request.headers.get("authorization", "")):
+            return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="Tesla Invoices"'})
+    return await call_next(request)
 
 
 @app.get("/")
@@ -181,7 +230,13 @@ def _collect_analytics() -> dict[str, Any]:
                 if meta.get("type") == "charging":
                     total_kwh += float(meta.get("energy_kwh", 0) or 0)
                 vehicles.add(meta.get("vehicle_name") or meta.get("vin"))
-                if "email_skipped" in meta and "email_sent" not in meta:
+                # Only count sidecars whose PDF still exists — the combined
+                # export sends PDFs, so orphans would inflate the button count
+                if (
+                    "email_skipped" in meta
+                    and "email_sent" not in meta
+                    and json_file.with_suffix(".pdf").exists()
+                ):
                     email_skipped_count += 1
         except Exception as e:
             logger.error(f"Failed to read {json_file}: {e}")
@@ -254,9 +309,15 @@ async def rescan_pdfs() -> dict[str, Any]:
     """Re-extract cost/currency from stored subscription PDFs with the current
     parser logic. Charging figures come from the Tesla API, not the PDFs, so
     those sidecars are refreshed by a normal sync instead."""
-    # PDF parsing is CPU-heavy; run it in a thread so the event loop (and the
-    # watchdog's /health endpoint) stays responsive during a long rescan.
-    return await asyncio.to_thread(_rescan_pdfs)
+    # Serialized against syncs via the same lock, so the rescan never reads a
+    # PDF that is still being downloaded and never fights the downloader over
+    # a sidecar. Refuse instead of queueing: a full sync can take minutes.
+    if _sync_lock.locked():
+        raise HTTPException(status_code=409, detail="A sync is running — retry when it has finished")
+    async with _sync_lock:
+        # PDF parsing is CPU-heavy; run it in a thread so the event loop (and
+        # the watchdog's /health endpoint) stays responsive during a long rescan.
+        return await asyncio.to_thread(_rescan_pdfs)
 
 
 def _rescan_pdfs() -> dict[str, Any]:
@@ -264,10 +325,7 @@ def _rescan_pdfs() -> dict[str, Any]:
     skipped = 0
     for pdf_path in sorted(config.invoice_path.glob("*.pdf")):
         json_path = pdf_path.with_suffix(".json")
-        try:
-            existing = json.loads(json_path.read_text()) if json_path.exists() else {}
-        except Exception:
-            existing = {}
+        existing = storage.read_json(json_path)
 
         if existing.get("type") == "charging":
             skipped += 1
@@ -287,14 +345,10 @@ def _rescan_pdfs() -> dict[str, Any]:
             # Credit notes must reduce the totals, whatever sign the PDF prints.
             total_cost = -abs(total_cost)
 
-        metadata = {
-            **existing,
-            "total_cost": total_cost,
-            "currency": currency,
-            "meta_version": METADATA_VERSION,
-        }
-        if metadata != existing:
-            json_path.write_text(json.dumps(metadata, indent=4, sort_keys=True))
+        if storage.update_json(
+            json_path,
+            {"total_cost": total_cost, "currency": currency, "meta_version": METADATA_VERSION},
+        ):
             updated += 1
 
     logger.info(f"PDF rescan finished: {updated} metadata file(s) updated, {skipped} charging file(s) skipped")
@@ -353,26 +407,46 @@ async def download_invoice(filename: str, inline: bool = False):
 
 
 @app.delete("/api/files/{filename}")
-async def delete_file(filename: str) -> dict[str, str]:
+async def delete_file(filename: str) -> dict[str, Any]:
     """Delete a single stored file (PDF or metadata sidecar). A deleted PDF
     is re-downloaded on the next sync as long as its invoice exists at Tesla."""
     file_path = _resolve_invoice_file(filename, (".pdf", ".json"))
     file_path.unlink()
-    logger.info(f"Deleted {file_path.name} via file browser")
-    return {"status": "deleted", "file": file_path.name}
+    # Deleting a PDF removes its sidecar too — an orphan sidecar would keep a
+    # ghost row in the dashboard and CSV with no file behind it.
+    sidecar_deleted = False
+    if file_path.suffix == ".pdf":
+        sidecar = file_path.with_suffix(".json")
+        if sidecar.is_file():
+            sidecar.unlink()
+            sidecar_deleted = True
+    logger.info(f"Deleted {file_path.name} via file browser (sidecar too: {sidecar_deleted})")
+    return {"status": "deleted", "file": file_path.name, "sidecar_deleted": sidecar_deleted}
+
+
+class EmailRequest(BaseModel):
+    """Recipient travels in the POST body: addresses in query strings end up
+    in proxy and access logs."""
+
+    to: str | None = None
+
+
+def _validated_recipient(payload: EmailRequest | None) -> str:
+    if not emailer.is_configured:
+        raise HTTPException(status_code=400, detail="Email is not configured (from/mailserver missing)")
+    recipient = ((payload.to if payload else None) or config.email_to).strip()
+    if "@" not in recipient:
+        raise HTTPException(status_code=422, detail="Recipient must be a valid email address")
+    return recipient
 
 
 # NOTE: must be registered before /api/email/{filename}, or "send-skipped"
 # would be interpreted as a file name by the route below.
 @app.post("/api/email/send-skipped")
-async def email_skipped_invoices(to: str | None = None) -> dict[str, Any]:
+async def email_skipped_invoices(payload: EmailRequest | None = None) -> dict[str, Any]:
     """Send all invoices flagged ``email_skipped`` as a combined export
     (batched into a few emails instead of one per invoice)."""
-    if not emailer.is_configured:
-        raise HTTPException(status_code=400, detail="Email is not configured (from/mailserver missing)")
-    recipient = (to or config.email_to).strip()
-    if "@" not in recipient:
-        raise HTTPException(status_code=422, detail="Recipient must be a valid email address")
+    recipient = _validated_recipient(payload)
     try:
         result = await asyncio.to_thread(emailer.send_skipped, recipient)
     except Exception as e:
@@ -382,15 +456,11 @@ async def email_skipped_invoices(to: str | None = None) -> dict[str, Any]:
 
 
 @app.post("/api/email/{filename}")
-async def email_invoice(filename: str, to: str | None = None) -> dict[str, str]:
-    """Manually send one invoice PDF; ``to`` overrides the configured
-    recipient (the UI pre-populates it with the config default)."""
+async def email_invoice(filename: str, payload: EmailRequest | None = None) -> dict[str, str]:
+    """Manually send one invoice PDF; body ``{"to": …}`` overrides the
+    configured recipient (the UI pre-populates it with the config default)."""
     file_path = _resolve_invoice_file(filename, (".pdf",))
-    if not emailer.is_configured:
-        raise HTTPException(status_code=400, detail="Email is not configured (from/mailserver missing)")
-    recipient = (to or config.email_to).strip()
-    if "@" not in recipient:
-        raise HTTPException(status_code=422, detail="Recipient must be a valid email address")
+    recipient = _validated_recipient(payload)
     try:
         await asyncio.to_thread(emailer.send_single, file_path, recipient)
     except Exception as e:
@@ -400,28 +470,37 @@ async def email_invoice(filename: str, to: str | None = None) -> dict[str, str]:
 
 
 @app.get("/api/export.zip")
-async def export_zip() -> Response:
+async def export_zip() -> FileResponse:
     """All stored invoice PDFs bundled into a single ZIP for bulk download."""
-    return await asyncio.to_thread(_build_zip)
+    zip_path = await asyncio.to_thread(_build_zip)
+    # Served from a temp file and deleted after the response: years of
+    # invoices assembled in memory could OOM a small Home Assistant box.
+    return FileResponse(
+        path=zip_path,
+        media_type="application/zip",
+        filename="tesla_invoices.zip",
+        background=BackgroundTask(os.unlink, zip_path),
+    )
 
 
-def _build_zip() -> Response:
-    import io
+def _build_zip() -> str:
+    import tempfile
     import zipfile
 
-    buffer = io.BytesIO()
-    # PDFs are already compressed, so store them as-is instead of wasting
-    # CPU on deflate for a ~0% gain.
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_STORED) as archive:
-        for pdf_file in sorted(config.invoice_path.glob("*.pdf")):
-            if pdf_file.name.startswith("."):
-                continue  # internal state files are never invoices
-            archive.write(pdf_file, arcname=pdf_file.name)
-    return Response(
-        content=buffer.getvalue(),
-        media_type="application/zip",
-        headers={"Content-Disposition": 'attachment; filename="tesla_invoices.zip"'},
-    )
+    fd, zip_path = tempfile.mkstemp(prefix="tesla_invoices_", suffix=".zip")
+    try:
+        # PDFs are already compressed, so store them as-is instead of wasting
+        # CPU on deflate for a ~0% gain.
+        with os.fdopen(fd, "wb") as fh, zipfile.ZipFile(fh, "w", zipfile.ZIP_STORED) as archive:
+            for pdf_file in sorted(config.invoice_path.glob("*.pdf")):
+                if pdf_file.name.startswith("."):
+                    continue  # internal state files are never invoices
+                archive.write(pdf_file, arcname=pdf_file.name)
+    except BaseException:
+        with suppress(OSError):
+            os.unlink(zip_path)
+        raise
+    return zip_path
 
 
 def _csv_safe(value: Any) -> Any:

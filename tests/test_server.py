@@ -9,8 +9,42 @@ def client(tmp_path, monkeypatch):
     invoice_dir = tmp_path / "invoices"
     invoice_dir.mkdir()
     monkeypatch.setattr(server.config, "invoice_path", invoice_dir)
-    # No `with` block: the download loop (lifespan) must not start in tests
-    return TestClient(server.app)
+    # No `with` block: the download loop (lifespan) must not start in tests.
+    # The X-Requested-With header is what the real frontend sends on every
+    # request; mutating endpoints reject requests without it (CSRF).
+    return TestClient(server.app, headers={"X-Requested-With": "tesla-invoices"})
+
+
+def test_mutating_requests_require_csrf_header(client):
+    (server.config.invoice_path / "invoice.pdf").write_bytes(b"%PDF-fake")
+    bare = TestClient(server.app)  # simulates a cross-site form POST
+
+    assert bare.post("/api/sync?month=cur").status_code == 403
+    assert bare.post("/api/email/send-skipped").status_code == 403
+    assert bare.delete("/api/files/invoice.pdf").status_code == 403
+    assert (server.config.invoice_path / "invoice.pdf").exists()
+    # Reads stay open — forms cannot exfiltrate GET responses cross-origin
+    assert bare.get("/health").status_code == 200
+
+
+def test_basic_auth_protects_everything_but_health(client, monkeypatch):
+    import base64
+
+    monkeypatch.setattr(server.config, "basic_auth_user", "admin")
+    monkeypatch.setattr(server.config, "basic_auth_pass", "secret")
+
+    assert client.get("/api/analytics").status_code == 401
+    assert client.get("/").status_code == 401
+    # The Docker healthcheck and HA watchdog poll without credentials
+    assert client.get("/health").status_code == 200
+
+    good = {"Authorization": "Basic " + base64.b64encode(b"admin:secret").decode()}
+    assert client.get("/api/analytics", headers=good).status_code == 200
+
+    bad = {"Authorization": "Basic " + base64.b64encode(b"admin:wrong").decode()}
+    assert client.get("/api/analytics", headers=bad).status_code == 401
+    assert client.get("/api/analytics", headers={"Authorization": "Basic %%%"}).status_code == 401
+    assert client.get("/api/analytics", headers={"Authorization": "Bearer token"}).status_code == 401
 
 
 def test_health(client):
@@ -135,13 +169,13 @@ def test_email_endpoint_custom_recipient(client, monkeypatch):
     sent = []
     monkeypatch.setattr(server.emailer, "send_single", lambda pdf, to=None: sent.append((pdf.name, to)))
 
-    response = client.post("/api/email/invoice.pdf?to=custom%40example.com")
+    response = client.post("/api/email/invoice.pdf", json={"to": "custom@example.com"})
     assert response.status_code == 200
     assert response.json() == {"status": "sent", "to": "custom@example.com"}
     assert sent == [("invoice.pdf", "custom@example.com")]
 
-    # Neither a valid ?to= nor a configured default -> 422
-    assert client.post("/api/email/invoice.pdf?to=notanaddress").status_code == 422
+    # Neither a valid body "to" nor a configured default -> 422
+    assert client.post("/api/email/invoice.pdf", json={"to": "notanaddress"}).status_code == 422
     assert client.post("/api/email/invoice.pdf").status_code == 422
 
 
@@ -164,10 +198,10 @@ def test_send_skipped_endpoint(client, monkeypatch):
     assert calls == ["b@example.com"]
 
     # Custom recipient overrides the configured default
-    response = client.post("/api/email/send-skipped?to=custom%40example.com")
+    response = client.post("/api/email/send-skipped", json={"to": "custom@example.com"})
     assert response.json()["to"] == "custom@example.com"
 
-    assert client.post("/api/email/send-skipped?to=notanaddress").status_code == 422
+    assert client.post("/api/email/send-skipped", json={"to": "notanaddress"}).status_code == 422
 
 
 def test_send_skipped_requires_configuration(client):
@@ -178,11 +212,16 @@ def test_analytics_counts_skipped_and_reports_export_flag(client):
     import json as jsonlib
 
     base = {"type": "charging", "date": "2026-07-01T10:00:00", "total_cost": 1.0, "currency": "EUR"}
+    for name in ("skipped", "sent", "fresh"):
+        (server.config.invoice_path / f"{name}.pdf").write_bytes(b"%PDF-fake")
     (server.config.invoice_path / "skipped.json").write_text(jsonlib.dumps({**base, "email_skipped": 1}))
     (server.config.invoice_path / "sent.json").write_text(
         jsonlib.dumps({**base, "email_skipped": 1, "email_sent": 2})
     )
     (server.config.invoice_path / "fresh.json").write_text(jsonlib.dumps(base))
+    # Orphan sidecar without its PDF: the combined export sends PDFs, so it
+    # must not inflate the count
+    (server.config.invoice_path / "orphan.json").write_text(jsonlib.dumps({**base, "email_skipped": 1}))
 
     summary = client.get("/api/analytics").json()["summary"]
     assert summary["email_skipped_count"] == 1
@@ -295,6 +334,26 @@ def test_delete_file(client):
     assert not pdf.exists()
 
     assert client.delete("/api/files/invoice.pdf").status_code == 404
+
+
+def test_delete_pdf_removes_sidecar_too(client):
+    pdf = server.config.invoice_path / "invoice.pdf"
+    pdf.write_bytes(b"%PDF-fake")
+    sidecar = pdf.with_suffix(".json")
+    sidecar.write_text('{"type": "charging"}')
+
+    response = client.delete("/api/files/invoice.pdf")
+    assert response.status_code == 200
+    assert response.json()["sidecar_deleted"] is True
+    # No orphan sidecar: it would keep a ghost row in the dashboard and CSV
+    assert not pdf.exists() and not sidecar.exists()
+
+
+def test_rescan_conflicts_with_running_sync(client, monkeypatch):
+    import types
+
+    monkeypatch.setattr(server, "_sync_lock", types.SimpleNamespace(locked=lambda: True))
+    assert client.post("/api/files/rescan").status_code == 409
 
 
 def test_delete_rejects_traversal_and_foreign_suffixes(client, tmp_path):
