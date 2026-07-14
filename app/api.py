@@ -11,6 +11,7 @@ from curl_cffi import requests as curl_requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from app.auth import REDIRECT_URI
 from app.config import Config
 
 logger = logging.getLogger(__name__)
@@ -342,7 +343,7 @@ class TokenManager:
             "code": code,
             "code_verifier": verifier,
             # Must match the redirect_uri used to build the authorize URL.
-            "redirect_uri": "https://auth.tesla.com/void/callback",
+            "redirect_uri": REDIRECT_URI,
         }
         try:
             data = self._auth_post(payload)

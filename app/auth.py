@@ -8,8 +8,15 @@ the flow is split in two:
 
   1. build the authorize URL — the user opens it in their own browser and
      signs in;
-  2. Tesla redirects to ``/void/callback?code=…`` (a "Page Not Found" page);
-     the user copies that URL back and we exchange the code for tokens.
+  2. Tesla redirects to ``tesla://auth/callback?code=…`` (the mobile app's
+     deep link — on a computer the browser cannot open it and shows an error
+     page instead); the user copies that address back and we exchange the
+     code for tokens.
+
+Tesla deregistered the old ``https://auth.tesla.com/void/callback`` redirect
+for ``ownerapi`` (~2026-04): it now fails with "The 'redirect_uri' supplied
+is not registered for this 'client_id'". The mobile-app deep link is the one
+that keeps working (same fix as tesla_auth v0.13.0, adriankumpf/tesla_auth#99).
 
 The token exchange itself lives in TokenManager, because it needs the same
 browser-TLS-fingerprint transport (curl_cffi) as the refresh — Tesla issues
@@ -22,7 +29,7 @@ import secrets
 from urllib.parse import parse_qs, urlencode, urlparse
 
 AUTHORIZE_URL = "https://auth.tesla.com/oauth2/v3/authorize"
-REDIRECT_URI = "https://auth.tesla.com/void/callback"
+REDIRECT_URI = "tesla://auth/callback"
 CLIENT_ID = "ownerapi"
 SCOPE = "openid email offline_access"
 
@@ -51,8 +58,9 @@ def build_authorize_url(challenge: str, state: str) -> str:
 def parse_callback(value: str) -> tuple[str, str]:
     """Extract ``(code, state)`` from what the user pastes back.
 
-    Accepts the full callback URL (``https://auth.tesla.com/void/callback?
-    code=…&state=…``) or, as a fallback, a bare authorization code.
+    Accepts the full callback URL (``tesla://auth/callback?code=…&state=…``,
+    or the legacy ``https://auth.tesla.com/void/callback?…`` form) or, as a
+    fallback, a bare authorization code.
     """
     value = (value or "").strip()
     # A URL (has a scheme or a query string) is always parsed as such — its

@@ -172,6 +172,8 @@
             gap: 0.75rem 1rem;
             flex-wrap: wrap;
         }
+        /* display:flex would otherwise defeat the hidden attribute */
+        .banner.info[hidden] { display: none; }
         .banner.info .btn { flex-shrink: 0; }
         .account-state { font-size: 0.85rem; color: var(--muted); }
         #account-status.connected { color: var(--green); }
@@ -672,8 +674,8 @@
             <div class="dialog-body">
                 <p data-i18n="auth_step1">1. Open the Tesla login in a new tab and sign in with your Tesla account. You may be asked to solve a security check — that is Tesla's, not this app's.</p>
                 <a id="auth-open-btn" class="btn primary" href="#" target="_blank" rel="noopener" data-i18n="auth_open_login">Open Tesla login</a>
-                <p style="margin-top:1rem;" data-i18n="auth_step2">2. After signing in you land on a "Page Not Found" page. Copy that page's full web address from your browser's address bar and paste it here:</p>
-                <input id="auth-input" type="text" placeholder="https://auth.tesla.com/void/callback?code=..." autocomplete="off">
+                <p style="margin-top:1rem;" data-i18n="auth_step2">2. After signing in, the browser tries to open the Tesla app and shows an error or an empty page instead — that is expected. Copy the full web address from the address bar (it starts with "tesla://auth/callback") and paste it here:</p>
+                <input id="auth-input" type="text" placeholder="tesla://auth/callback?code=..." autocomplete="off">
                 <p id="auth-error" class="dialog-error" hidden></p>
             </div>
             <div class="dialog-actions">
@@ -856,13 +858,14 @@
                 auth_step1: '1. Open the Tesla login in a new tab and sign in with your Tesla account. You may be '
                     + 'asked to solve a security check — that is Tesla\'s, not this app\'s.',
                 auth_open_login: 'Open Tesla login',
-                auth_step2: '2. After signing in you land on a "Page Not Found" page. Copy that page\'s full web '
-                    + 'address from your browser\'s address bar and paste it here:',
+                auth_step2: '2. After signing in, the browser tries to open the Tesla app and shows an error or '
+                    + 'an empty page instead — that is expected. Copy the full web address from the address bar '
+                    + '(it starts with "tesla://auth/callback") and paste it here:',
                 btn_auth_complete: 'Connect',
                 auth_connecting: 'Connecting…',
                 auth_success: 'Connected — fetching your invoices now…',
-                auth_no_code: 'That address does not contain a login code. Copy the full address of the '
-                    + '"Page Not Found" page after signing in.',
+                auth_no_code: 'That address does not contain a login code. After signing in, copy the full '
+                    + 'address starting with "tesla://auth/callback" from the address bar.',
                 auth_failed: 'Login failed: {error}',
             },
             de: {
@@ -967,13 +970,14 @@
                     + 'an. Möglicherweise musst du eine Sicherheitsabfrage lösen — die stammt von Tesla, nicht '
                     + 'von dieser App.',
                 auth_open_login: 'Tesla-Anmeldung öffnen',
-                auth_step2: '2. Nach der Anmeldung landest du auf einer Seite „Seite nicht gefunden“. Kopiere die '
-                    + 'vollständige Web-Adresse dieser Seite aus der Adresszeile deines Browsers und füge sie hier ein:',
+                auth_step2: '2. Nach der Anmeldung versucht der Browser, die Tesla-App zu öffnen, und zeigt '
+                    + 'stattdessen einen Fehler oder eine leere Seite — das ist normal. Kopiere die vollständige '
+                    + 'Web-Adresse aus der Adresszeile (sie beginnt mit „tesla://auth/callback“) und füge sie hier ein:',
                 btn_auth_complete: 'Verbinden',
                 auth_connecting: 'Wird verbunden…',
                 auth_success: 'Verbunden — deine Rechnungen werden jetzt abgerufen…',
-                auth_no_code: 'Diese Adresse enthält keinen Anmelde-Code. Kopiere die vollständige Adresse der '
-                    + 'Seite „Seite nicht gefunden“ nach der Anmeldung.',
+                auth_no_code: 'Diese Adresse enthält keinen Anmelde-Code. Kopiere nach der Anmeldung die '
+                    + 'vollständige Adresse aus der Adresszeile, die mit „tesla://auth/callback“ beginnt.',
                 auth_failed: 'Anmeldung fehlgeschlagen: {error}',
             },
         };

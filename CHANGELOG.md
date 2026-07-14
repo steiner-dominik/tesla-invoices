@@ -1,4 +1,23 @@
 <!-- https://developers.home-assistant.io/docs/apps/presentation#keeping-a-changelog -->
+## 2026.07.07
+
+Two fixes for the in-app Tesla login introduced in 2026.07.06:
+
+- **"Open Tesla login" works again**: Tesla deregistered the
+  `https://auth.tesla.com/void/callback` redirect that the login relied on,
+  so it failed with *"The 'redirect_uri' supplied is not registered for this
+  'client_id'"*. The login now uses the Tesla mobile app's
+  `tesla://auth/callback` deep link instead — the same fix as
+  [tesla_auth v0.13.0](https://github.com/adriankumpf/tesla_auth). After
+  signing in, the browser shows an error or an empty page (it cannot open
+  the Tesla app) — copy the `tesla://auth/callback?code=…` address from the
+  address bar and paste it into the app, as the updated dialog explains.
+- **Setup banner no longer sticks around**: the "Welcome! Connect your Tesla
+  account" banner was shown even when a token was already configured (e.g.
+  via the `refresh_token` option or `REFRESH_TOKEN`), because its stylesheet
+  overrode the attribute that hides it. It now disappears as soon as a Tesla
+  account is connected.
+
 ## 2026.07.06
 
 - **Sign in from the dashboard — no token needed to start**: a new **Connect

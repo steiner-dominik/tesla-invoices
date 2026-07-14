@@ -421,7 +421,7 @@ def test_auth_login_complete_exchanges_and_kicks_off_sync(client, monkeypatch):
     monkeypatch.setattr(server, "_run_sync", fake_run_sync)
 
     response = client.post("/api/auth/login/complete", json={
-        "callback_url": f"https://auth.tesla.com/void/callback?code=THECODE&state={state}",
+        "callback_url": f"tesla://auth/callback?code=THECODE&state={state}",
     })
     assert response.status_code == 200
     assert response.json() == {"status": "connected"}
@@ -437,7 +437,7 @@ def test_auth_login_complete_rejects_state_mismatch(client, monkeypatch):
         lambda code, verifier: (_ for _ in ()).throw(AssertionError("must not exchange on mismatch")),
     )
     response = client.post("/api/auth/login/complete", json={
-        "callback_url": "https://auth.tesla.com/void/callback?code=X&state=WRONG",
+        "callback_url": "tesla://auth/callback?code=X&state=WRONG",
     })
     assert response.status_code == 422
 
@@ -445,7 +445,7 @@ def test_auth_login_complete_rejects_state_mismatch(client, monkeypatch):
 def test_auth_login_complete_without_pending_is_409(client):
     server._pending_login.clear()
     response = client.post("/api/auth/login/complete", json={
-        "callback_url": "https://auth.tesla.com/void/callback?code=ABC&state=x",
+        "callback_url": "tesla://auth/callback?code=ABC&state=x",
     })
     assert response.status_code == 409
 
@@ -453,7 +453,7 @@ def test_auth_login_complete_without_pending_is_409(client):
 def test_auth_login_complete_requires_code(client):
     client.post("/api/auth/login/start")
     response = client.post("/api/auth/login/complete", json={
-        "callback_url": "https://auth.tesla.com/void/callback?state=only",
+        "callback_url": "tesla://auth/callback?state=only",
     })
     assert response.status_code == 422
 

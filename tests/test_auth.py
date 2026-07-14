@@ -22,14 +22,24 @@ def test_build_authorize_url_has_required_params():
     assert qs["code_challenge"] == ["CHAL"]
     assert qs["code_challenge_method"] == ["S256"]
     assert qs["state"] == ["STATE"]
-    assert qs["redirect_uri"] == ["https://auth.tesla.com/void/callback"]
+    # The mobile-app deep link: the old https://auth.tesla.com/void/callback
+    # was deregistered by Tesla (~2026-04) and now fails with
+    # "The 'redirect_uri' supplied is not registered for this 'client_id'".
+    assert qs["redirect_uri"] == ["tesla://auth/callback"]
     assert qs["scope"] == ["openid email offline_access"]
 
 
 def test_parse_callback_full_url():
     code, state = auth.parse_callback(
-        "https://auth.tesla.com/void/callback?code=ABC123&state=xyz&issuer=https://auth.tesla.com/oauth2/v3"
+        "tesla://auth/callback?code=ABC123&state=xyz&issuer=https://auth.tesla.com/oauth2/v3"
     )
+    assert code == "ABC123"
+    assert state == "xyz"
+
+
+def test_parse_callback_legacy_https_url():
+    # Pasting an https:// style callback keeps working too.
+    code, state = auth.parse_callback("https://auth.tesla.com/void/callback?code=ABC123&state=xyz")
     assert code == "ABC123"
     assert state == "xyz"
 
@@ -41,5 +51,5 @@ def test_parse_callback_bare_code():
 
 
 def test_parse_callback_missing_code():
-    code, state = auth.parse_callback("https://auth.tesla.com/void/callback?state=xyz")
+    code, state = auth.parse_callback("tesla://auth/callback?state=xyz")
     assert code == ""
