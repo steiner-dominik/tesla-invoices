@@ -228,6 +228,12 @@ def test_analytics_counts_skipped_and_reports_export_flag(client):
     assert summary["email_export_enabled"] is False
 
 
+def test_analytics_reports_default_language(client, monkeypatch):
+    assert client.get("/api/analytics").json()["summary"]["language"] == ""
+    monkeypatch.setattr(server.config, "language", "de")
+    assert client.get("/api/analytics").json()["summary"]["language"] == "de"
+
+
 def test_internal_state_files_are_hidden(client):
     import json as jsonlib
 
@@ -388,6 +394,73 @@ def test_rescan_pdfs_updates_metadata(client, monkeypatch):
 
 def test_sync_rejects_bad_month(client):
     assert client.post("/api/sync?month=banana").status_code == 422
+
+
+def test_auth_login_start_returns_authorize_url(client):
+    body = client.post("/api/auth/login/start").json()
+    assert body["url"].startswith("https://auth.tesla.com/oauth2/v3/authorize?")
+    assert "code_challenge=" in body["url"]
+
+
+def test_auth_login_complete_exchanges_and_kicks_off_sync(client, monkeypatch):
+    # Start the flow so the server holds the PKCE verifier + state
+    client.post("/api/auth/login/start")
+    state = server._pending_login["state"]
+
+    calls = []
+    monkeypatch.setattr(
+        server.downloader.client.token_manager,
+        "exchange_authorization_code",
+        lambda code, verifier: calls.append((code, verifier)),
+    )
+    started = []
+
+    async def fake_run_sync(*args, **kwargs):
+        started.append(args)
+
+    monkeypatch.setattr(server, "_run_sync", fake_run_sync)
+
+    response = client.post("/api/auth/login/complete", json={
+        "callback_url": f"https://auth.tesla.com/void/callback?code=THECODE&state={state}",
+    })
+    assert response.status_code == 200
+    assert response.json() == {"status": "connected"}
+    assert calls and calls[0][0] == "THECODE"
+    assert server._pending_login == {}  # cleared after use
+
+
+def test_auth_login_complete_rejects_state_mismatch(client, monkeypatch):
+    client.post("/api/auth/login/start")
+    monkeypatch.setattr(
+        server.downloader.client.token_manager,
+        "exchange_authorization_code",
+        lambda code, verifier: (_ for _ in ()).throw(AssertionError("must not exchange on mismatch")),
+    )
+    response = client.post("/api/auth/login/complete", json={
+        "callback_url": "https://auth.tesla.com/void/callback?code=X&state=WRONG",
+    })
+    assert response.status_code == 422
+
+
+def test_auth_login_complete_without_pending_is_409(client):
+    server._pending_login.clear()
+    response = client.post("/api/auth/login/complete", json={
+        "callback_url": "https://auth.tesla.com/void/callback?code=ABC&state=x",
+    })
+    assert response.status_code == 409
+
+
+def test_auth_login_complete_requires_code(client):
+    client.post("/api/auth/login/start")
+    response = client.post("/api/auth/login/complete", json={
+        "callback_url": "https://auth.tesla.com/void/callback?state=only",
+    })
+    assert response.status_code == 422
+
+
+def test_analytics_reports_token_configured(client):
+    # The fixture config has no token files and no env tokens
+    assert client.get("/api/analytics").json()["summary"]["token_configured"] is False
 
 
 def test_health_fails_when_download_loop_died(client, monkeypatch):

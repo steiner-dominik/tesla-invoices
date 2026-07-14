@@ -16,8 +16,8 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
-from app import storage
-from app.api import TeslaAPIClient, TokenManager
+from app import auth, storage
+from app.api import TeslaAPIClient, TeslaAuthError, TokenManager
 from app.config import Config
 from app.downloader import METADATA_VERSION, InvoiceDownloader
 from app.emailer import EmailExporter
@@ -264,6 +264,12 @@ def _collect_analytics() -> dict[str, Any]:
         "email_export_enabled": config.enable_email_export,
         # Invoices flagged email_skipped, sendable via the combined export
         "email_skipped_count": email_skipped_count,
+        # Default dashboard language (HA language or LANGUAGE env var);
+        # empty lets the browser decide. The user's toggle choice wins.
+        "language": config.language,
+        # Whether a Tesla token is configured; the UI shows the login flow
+        # (and a setup banner) when this is false.
+        "token_configured": downloader.client.token_manager.has_token(),
     }
 
     return {"summary": summary, "data": data, "sync": _sync_state}
@@ -381,6 +387,61 @@ async def trigger_sync(month: str = "all", skip_email: bool = False) -> dict[str
 
     _manual_sync_task = asyncio.create_task(_run_sync(months, kind=f"manual ({month})", skip_email=skip_email))
     return {"status": "started", "month": month}
+
+
+# Holds the PKCE verifier + state between login/start and login/complete.
+# Single-user app, so one in-flight login at a time is enough; lost on
+# restart, in which case the user simply starts the flow again.
+_pending_login: dict[str, str] = {}
+
+
+@app.post("/api/auth/login/start")
+async def auth_login_start() -> dict[str, str]:
+    """Begin an interactive Tesla login: return the URL the user opens in
+    their browser to sign in. No token is needed to call this — it is how a
+    fresh install gets its first token."""
+    verifier, challenge = auth.generate_pkce()
+    state = secrets.token_urlsafe(16)
+    _pending_login.clear()
+    _pending_login.update({"verifier": verifier, "state": state})
+    return {"url": auth.build_authorize_url(challenge, state)}
+
+
+class CallbackRequest(BaseModel):
+    callback_url: str
+
+
+@app.post("/api/auth/login/complete")
+async def auth_login_complete(payload: CallbackRequest) -> dict[str, str]:
+    """Finish the login: parse the pasted callback URL, exchange the code for
+    tokens, persist them, and kick off a first sync so invoices appear right
+    away instead of only on the next poll."""
+    global _manual_sync_task
+    code, state = auth.parse_callback(payload.callback_url)
+    if not code:
+        raise HTTPException(status_code=422, detail="No authorization code found in the pasted address")
+
+    verifier = _pending_login.get("verifier")
+    expected_state = _pending_login.get("state")
+    if not verifier:
+        raise HTTPException(status_code=409, detail="No login in progress — start the login again")
+    # state is only absent when the user pasted a bare code; when present it
+    # must match, which ties the callback to the login this server started.
+    if state and expected_state and state != expected_state:
+        raise HTTPException(status_code=422, detail="Login state mismatch — start the login again")
+
+    token_manager = downloader.client.token_manager
+    try:
+        await asyncio.to_thread(token_manager.exchange_authorization_code, code, verifier)
+    except TeslaAuthError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    _pending_login.clear()
+
+    # Fetch the current and previous month immediately (unless a sync is
+    # already running), so the dashboard is not empty after connecting.
+    if not _sync_lock.locked():
+        _manual_sync_task = asyncio.create_task(_run_sync(_current_and_previous_month(), kind="after login"))
+    return {"status": "connected"}
 
 
 def _resolve_invoice_file(filename: str, suffixes: tuple[str, ...]) -> Path:

@@ -32,52 +32,44 @@ Runs anywhere Docker runs — or as a
   once; individual invoices can also be mailed on demand to any recipient.
 - **Multi-currency aware** — costs are grouped per currency (never blindly converted),
   with credit notes correctly reducing your totals.
-- **Self-healing auth** — you only need a refresh token; access tokens are obtained and
-  rotated automatically and stored with strict file permissions.
+- **English & German** — the dashboard follows the Home Assistant language (or the
+  `LANGUAGE` env var / browser language when standalone) and can be switched
+  anytime via the EN/DE toggle in the header.
+- **Sign in from the dashboard** — no token wrangling: start the app, click
+  **Connect Tesla account**, log in on Tesla's own page, and you're done. The
+  token is obtained, rotated, and stored automatically with strict file permissions.
 
 ## 🚀 Quick start (Docker)
 
-You need a Tesla **refresh token**, generated with one of these apps:
-
-| Platform | App |
-| -------- | --- |
-| Windows / macOS / Linux | [tesla_auth](https://github.com/adriankumpf/tesla_auth) (recommended) |
-| iOS | [Auth app for Tesla](https://apps.apple.com/us/app/auth-app-for-tesla/id1552058613) |
-
-> 🔒 **Treat tokens like passwords.** They grant full access to your Tesla account.
-> Never commit them to version control.
->
-> Prefer not to hand the app a long-lived credential? Supply only a (short-lived)
-> **access token** instead — see the Configuration section below.
-
-```bash
-git clone https://github.com/steiner-dominik/tesla-invoices.git
-cd tesla-invoices
-
-# 1. Store your token(s)
-echo "YOUR_REFRESH_TOKEN" > secrets/refresh_token.txt
-
-# 2. Configure (polling interval, email export, …)
-cp docker.env.example docker.env   # then edit to taste
-
-# 3. Run
-docker compose up -d
-```
-
-Open **<http://localhost:9000>** — the first sync starts automatically.
-To fetch your complete invoice history, click **“Sync all history”** on the
-Maintenance tab.
-
-Prefer plain `docker run`?
+**No configuration needed to start.** Just run it:
 
 ```bash
 docker run -d --name tesla-invoices \
   -p 9000:9000 \
   -v ./invoices:/opt/tesla-invoices/invoices \
   -v ./secrets:/opt/tesla-invoices/secrets \
-  --env-file docker.env \
   ghcr.io/steiner-dominik/tesla-invoices:latest
 ```
+
+Then open **<http://localhost:9000>** and click **“Connect Tesla account”** —
+you log in on Tesla's own website (nothing but the resulting token is ever
+stored), and the first sync starts automatically. To fetch your complete
+history afterwards, click **“Sync all history”** on the Maintenance tab.
+
+That's the whole setup. Everything else — email export, polling interval,
+preferred currency, a login for the web UI — is optional (see
+[Configuration](#️-configuration)); with `docker compose` add an
+`env_file` for those. A ready-made [docker-compose.yml](docker-compose.yml)
+is included:
+
+```bash
+docker compose up -d
+```
+
+> 💡 **Prefer to bring your own token?** You still can: mount
+> `secrets/refresh_token.txt` or set `REFRESH_TOKEN` (or a short-lived
+> `ACCESS_TOKEN`) — see [Configuration](#️-configuration). The in-app login
+> is just the easy path.
 
 > ⚠️ The web UI has **no authentication by default** — only expose port 9000 on
 > a trusted network, set `BASIC_AUTH_USER`/`BASIC_AUTH_PASS` to require a
@@ -97,14 +89,18 @@ features, same dashboard, zero extra configuration files.
 
 All settings are environment variables (see [docker.env.example](docker.env.example)):
 
+**Everything here is optional** — the app starts with no configuration and you
+sign in from the dashboard.
+
 | Variable | Default | Description |
 | -------- | ------- | ----------- |
-| `REFRESH_TOKEN` | – | Tesla refresh token (alternatively mount `secrets/refresh_token.txt`) |
+| `REFRESH_TOKEN` | – | Optional Tesla refresh token (or mount `secrets/refresh_token.txt`); usually not needed — sign in from the dashboard instead |
 | `ACCESS_TOKEN` | – | Optional; obtained automatically from the refresh token if omitted (see note below) |
 | `TZ` | UTC | Time zone for timestamps and month boundaries, e.g. `Europe/Vienna` |
 | `POLLING_INTERVAL` | `15` | Minutes between checks for new invoices |
 | `ENABLE_SUBSCRIPTION_INVOICE` | `True` | Also download subscription (e.g. Premium Connectivity) invoices |
 | `DEFAULT_CURRENCY` | auto | Preferred dashboard currency (e.g. `EUR`); auto-detected when empty |
+| `LANGUAGE` | browser | Default dashboard language (`en`, `de`); the EN/DE toggle in the dashboard overrides it per user |
 | `ENABLE_EMAIL_EXPORT` | `False` | Email every new invoice, exactly once |
 | `EMAIL_FROM` / `EMAIL_TO` | – | Sender / recipient for the email export |
 | `EMAIL_SERVER` / `EMAIL_SERVER_PORT` | – / `587` | SMTP server; port 587 = STARTTLS, 465 = implicit TLS |
@@ -114,13 +110,19 @@ All settings are environment variables (see [docker.env.example](docker.env.exam
 | `INVOICE_PATH` | `/opt/tesla-invoices/invoices` | Where PDFs and metadata are stored |
 | `ACCESS_TOKEN_PATH` / `REFRESH_TOKEN_PATH` | `/opt/tesla-invoices/secrets/…` | Token file locations |
 
-**Access token only:** if you prefer not to give the app a long-lived,
-account-wide credential, you can supply just an `ACCESS_TOKEN` and leave
-`REFRESH_TOKEN` empty. The app then works until that token expires (typically
-a few hours) and stops syncing with a clear error until you provide a fresh
-one — with a refresh token this renewal happens automatically. The Home
-Assistant app intentionally has no access-token option; it always uses the
-refresh-token flow.
+**Signing in:** the easiest way is the **Connect Tesla account** button in the
+dashboard — it runs Tesla's normal login (on Tesla's own site) and stores the
+resulting refresh token for you. Supplying `REFRESH_TOKEN` / a mounted token
+file still works and simply pre-fills it. Tokens generated with
+[tesla_auth](https://github.com/adriankumpf/tesla_auth) or the iOS
+[Auth app for Tesla](https://apps.apple.com/us/app/auth-app-for-tesla/id1552058613)
+are accepted too.
+
+**Access token only:** if you prefer not to store a long-lived, account-wide
+credential, you can supply just an `ACCESS_TOKEN` and leave `REFRESH_TOKEN`
+empty. The app then works until that token expires (typically a few hours) and
+stops syncing with a clear error until you provide a fresh one — with a refresh
+token this renewal happens automatically.
 
 **Gmail tip:** use an [App Password](https://myaccount.google.com/apppasswords)
 (requires 2-step verification) — your normal account password will not work.
@@ -141,6 +143,8 @@ The dashboard is a thin client over a small REST API you can use directly:
 | `GET /api/files` | List stored files with previews (Files tab) |
 | `DELETE /api/files/{filename}` | Delete one stored PDF (its metadata file is deleted too) |
 | `POST /api/files/rescan` | Re-extract cost/currency from stored PDFs (409 while a sync runs) |
+| `POST /api/auth/login/start` | Begin an interactive Tesla login; returns the URL to open |
+| `POST /api/auth/login/complete` | Finish the login (JSON body `{"callback_url": "…"}`) and store the token |
 | `GET /health` | Health check (used by the HA watchdog and Docker) |
 
 > 🔐 **CSRF protection:** every `POST`/`DELETE` request must carry an

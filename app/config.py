@@ -19,6 +19,11 @@ def _to_int(value: object, name: str) -> int:
         raise ConfigurationError(f"{name} must be a number, got {value!r}") from None
 
 
+def _normalize_language(value: str) -> str:
+    """Bare language code: "de-AT", "de_DE" and "DE" all mean "de"."""
+    return (value or "").strip().replace("_", "-").split("-")[0].lower()[:2]
+
+
 @dataclass
 class Config:
     homeassistant: bool
@@ -35,6 +40,11 @@ class Config:
     # Preferred display currency in the dashboard; empty = auto-detect from
     # the invoices themselves. Costs are never converted between currencies.
     default_currency: str = ""
+    # Default dashboard language ("en"/"de"). In HA mode main() fills the
+    # LANGUAGE env var from the Core API; standalone sets it directly. Empty
+    # means: let the browser decide. The dashboard's own language toggle
+    # always wins (stored per browser).
+    language: str = ""
     email_from: str = ""
     email_to: str = ""
     email_server: str = ""
@@ -78,6 +88,7 @@ class Config:
             enable_subscription_invoice=options.get("enable_subscription_invoice", True),
             polling_interval=_to_int(options.get("polling_interval", 15), "polling_interval"),
             default_currency=(options.get("default_currency") or "").strip().upper(),
+            language=_normalize_language(os.environ.get("LANGUAGE", "")),
             env_refresh_token=options.get("refresh_token", ""),
             # The HA app intentionally has no access_token option: the refresh
             # token is all that's needed (access tokens are obtained/rotated
@@ -107,6 +118,7 @@ class Config:
             enable_subscription_invoice=os.environ.get("ENABLE_SUBSCRIPTION_INVOICE", "True").lower() == "true",
             polling_interval=_to_int(os.environ.get("POLLING_INTERVAL", "15"), "POLLING_INTERVAL"),
             default_currency=os.environ.get("DEFAULT_CURRENCY", "").strip().upper(),
+            language=_normalize_language(os.environ.get("LANGUAGE", "")),
             env_refresh_token=os.environ.get("REFRESH_TOKEN", ""),
             env_access_token=os.environ.get("ACCESS_TOKEN", ""),
             email_from=os.environ.get("EMAIL_FROM", ""),

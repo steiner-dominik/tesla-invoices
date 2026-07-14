@@ -250,6 +250,23 @@ class TokenManager:
 
         return best_token
 
+    def has_token(self) -> bool:
+        """Read-only check for whether any usable token is configured, for the
+        UI's setup state. Unlike load_tokens() it never raises or persists."""
+        pairs = (
+            (self.config.refresh_token_path, self.config.env_refresh_token),
+            (self.config.access_token_path, self.config.env_access_token),
+        )
+        for path, env_token in pairs:
+            if env_token.strip():
+                return True
+            try:
+                if path.exists() and path.read_text().strip():
+                    return True
+            except OSError:
+                pass
+        return False
+
     def load_tokens(self) -> None:
         # A refresh token is recommended (access tokens are then obtained and
         # rotated automatically), but an access token alone also works for
@@ -313,6 +330,39 @@ class TokenManager:
         result = curl_requests.post(AUTH_URL, json=payload, impersonate="chrome", timeout=30)
         result.raise_for_status()
         return result.json()
+
+    def exchange_authorization_code(self, code: str, verifier: str) -> None:
+        """Complete an interactive login: swap the authorization code (from the
+        UI OAuth flow) for tokens and persist them. The refresh token is what
+        every later sync runs on; the access token is a free head start."""
+        logger.info("Completing Tesla login (exchanging authorization code)")
+        payload = {
+            "grant_type": "authorization_code",
+            "client_id": "ownerapi",
+            "code": code,
+            "code_verifier": verifier,
+            # Must match the redirect_uri used to build the authorize URL.
+            "redirect_uri": "https://auth.tesla.com/void/callback",
+        }
+        try:
+            data = self._auth_post(payload)
+        except curl_requests.exceptions.RequestException as e:
+            raise TeslaAuthError(f"Tesla login failed: {e}") from e
+
+        refresh_token = data.get("refresh_token")
+        if not refresh_token:
+            raise TeslaAuthError(
+                "Tesla did not return a refresh token — the login may be incomplete "
+                "or the pasted address may be missing the code"
+            )
+        self.refresh_token = refresh_token
+        self._persist_token(self.config.refresh_token_path, refresh_token)
+        access_token = data.get("access_token")
+        if access_token:
+            self.access_token = access_token
+            self._persist_token(self.config.access_token_path, access_token)
+        self._expiry_warned = False
+        logger.info("Tesla login complete; refresh token stored")
 
     def refresh_access_token(self) -> None:
         if not self.refresh_token:

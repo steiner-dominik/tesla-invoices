@@ -48,6 +48,24 @@ def test_from_ha_bad_number_raises_configuration_error(tmp_path):
         Config.from_ha(options)
 
 
+def test_language_from_env_is_normalized(monkeypatch):
+    monkeypatch.setenv("LANGUAGE", "de-AT")
+    assert Config.from_env().language == "de"
+    monkeypatch.setenv("LANGUAGE", "DE_DE")
+    assert Config.from_env().language == "de"
+    monkeypatch.delenv("LANGUAGE")
+    assert Config.from_env().language == ""
+
+
+def test_from_ha_picks_up_language_env(tmp_path, monkeypatch):
+    # In HA mode main() fills LANGUAGE from the Core API before the config
+    # is loaded; from_ha must pick it up the same way as from_env.
+    options = tmp_path / "options.json"
+    options.write_text(json.dumps({"refresh_token": "rt"}))
+    monkeypatch.setenv("LANGUAGE", "de")
+    assert Config.from_ha(options).language == "de"
+
+
 def test_from_ha_parses_options(tmp_path):
     options = tmp_path / "options.json"
     options.write_text(

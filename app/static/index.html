@@ -162,6 +162,20 @@
             margin-bottom: 1.25rem;
             font-size: 0.875rem;
         }
+        /* Info banner (Tesla account setup) — accent-toned, not an error */
+        .banner.info {
+            background: var(--accent-soft);
+            border-color: var(--accent);
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem 1rem;
+            flex-wrap: wrap;
+        }
+        .banner.info .btn { flex-shrink: 0; }
+        .account-state { font-size: 0.85rem; color: var(--muted); }
+        #account-status.connected { color: var(--green); }
+        #account-status.disconnected { color: var(--amber); }
         .tabs {
             display: flex;
             gap: 0.25rem;
@@ -436,7 +450,7 @@
         .dialog-body { padding: 1rem 0.9rem; font-size: 0.875rem; }
         .dialog-body p { margin: 0 0 0.75rem; white-space: pre-line; }
         .dialog-body p:last-child { margin-bottom: 0; }
-        .dialog-body input[type="email"] {
+        .dialog-body input[type="email"], .dialog-body input[type="text"] {
             width: 100%;
             padding: 0.45rem 0.6rem;
             border: 1px solid var(--border);
@@ -462,57 +476,65 @@
     <header>
         <h1>Tesla Invoices</h1>
         <div class="header-right">
-            <span id="sync-chip">Loading…</span>
+            <span id="sync-chip" data-i18n="chip_loading">Loading…</span>
+            <div class="theme-toggle" role="group" aria-label="Language">
+                <button type="button" data-lang-choice="en">EN</button>
+                <button type="button" data-lang-choice="de">DE</button>
+            </div>
             <div class="theme-toggle" role="group" aria-label="Color theme">
-                <button type="button" data-theme-choice="auto">Auto</button>
-                <button type="button" data-theme-choice="light">Light</button>
-                <button type="button" data-theme-choice="dark">Dark</button>
+                <button type="button" data-theme-choice="auto" data-i18n="theme_auto">Auto</button>
+                <button type="button" data-theme-choice="light" data-i18n="theme_light">Light</button>
+                <button type="button" data-theme-choice="dark" data-i18n="theme_dark">Dark</button>
             </div>
         </div>
     </header>
 
     <main>
+        <div id="setup-banner" class="banner info" hidden>
+            <span data-i18n="setup_banner_text">Welcome! Connect your Tesla account to start downloading your invoices — no configuration needed.</span>
+            <button id="setup-connect-btn" class="btn primary" type="button" data-i18n="btn_connect">Connect Tesla account</button>
+        </div>
         <div id="sync-banner" class="banner" hidden></div>
 
         <nav class="tabs">
-            <button class="tab-btn active" type="button" data-tab="tab-dashboard">Dashboard</button>
-            <button class="tab-btn" type="button" data-tab="tab-files">Files</button>
-            <button class="tab-btn" type="button" data-tab="tab-maintenance">Maintenance</button>
+            <button class="tab-btn active" type="button" data-tab="tab-dashboard" data-i18n="tab_dashboard">Dashboard</button>
+            <button class="tab-btn" type="button" data-tab="tab-files" data-i18n="tab_files">Files</button>
+            <button class="tab-btn" type="button" data-tab="tab-maintenance" data-i18n="tab_maintenance">Maintenance</button>
         </nav>
 
         <section id="tab-dashboard">
             <div class="filter-bar">
-                <input type="search" id="filter-search" placeholder="Search location, vehicle, file…">
-                <select id="filter-year"><option value="">All years</option></select>
-                <select id="filter-vehicle"><option value="">All vehicles</option></select>
+                <input type="search" id="filter-search" placeholder="Search location, vehicle, file…" data-i18n-placeholder="search_placeholder">
+                <select id="filter-year"><option value="" data-i18n="all_years">All years</option></select>
+                <select id="filter-vehicle"><option value="" data-i18n="all_vehicles">All vehicles</option></select>
                 <select id="filter-type">
-                    <option value="">All types</option>
-                    <option value="charging">Charging</option>
-                    <option value="subscription">Subscription</option>
+                    <option value="" data-i18n="all_types">All types</option>
+                    <option value="charging" data-i18n="type_charging">Charging</option>
+                    <option value="subscription" data-i18n="type_subscription">Subscription</option>
                 </select>
                 <span class="spacer"></span>
-                <a class="btn" href="api/export.csv" download>Export CSV</a>
-                <a class="btn" href="api/export.zip" download>Download all (ZIP)</a>
+                <a class="btn" href="api/export.csv" download data-i18n="export_csv">Export CSV</a>
+                <a class="btn" href="api/export.zip" download data-i18n="download_zip">Download all (ZIP)</a>
             </div>
 
             <div class="cards">
-                <div class="panel card"><h3>Invoices</h3><p id="stat-count">-</p></div>
-                <div class="panel card"><h3>Energy Charged</h3><p class="kwh" id="stat-kwh">-</p></div>
-                <div class="panel card"><h3>Total Cost</h3><p class="cost" id="stat-cost">-</p><small id="stat-cost-note"></small></div>
-                <div class="panel card"><h3>Vehicles</h3><p id="stat-vehicles">-</p></div>
+                <div class="panel card"><h3 data-i18n="card_invoices">Invoices</h3><p id="stat-count">-</p></div>
+                <div class="panel card"><h3 data-i18n="card_energy">Energy Charged</h3><p class="kwh" id="stat-kwh">-</p></div>
+                <div class="panel card"><h3 data-i18n="card_cost">Total Cost</h3><p class="cost" id="stat-cost">-</p><small id="stat-cost-note"></small></div>
+                <div class="panel card"><h3 data-i18n="card_vehicles">Vehicles</h3><p id="stat-vehicles">-</p></div>
             </div>
 
             <div class="charts">
                 <div class="panel chart-card">
                     <div class="chart-head">
-                        <h3>Energy per month</h3>
+                        <h3 data-i18n="chart_energy">Energy per month</h3>
                         <span class="chart-caption" id="caption-kwh"></span>
                     </div>
                     <div id="chart-kwh"></div>
                 </div>
                 <div class="panel chart-card">
                     <div class="chart-head">
-                        <h3 id="chart-cost-title">Cost per month</h3>
+                        <h3 id="chart-cost-title" data-i18n="chart_cost">Cost per month</h3>
                         <span class="chart-caption" id="caption-cost"></span>
                     </div>
                     <div id="chart-cost"></div>
@@ -523,18 +545,18 @@
                 <table>
                     <thead>
                         <tr>
-                            <th class="sortable" data-sort="date">Date <span class="arrow"></span></th>
-                            <th class="sortable" data-sort="vehicle">Vehicle <span class="arrow"></span></th>
-                            <th class="sortable" data-sort="type">Type <span class="arrow"></span></th>
-                            <th class="sortable" data-sort="location">Location <span class="arrow"></span></th>
-                            <th class="sortable num" data-sort="energy">Energy (kWh) <span class="arrow"></span></th>
-                            <th class="sortable num" data-sort="cost">Cost <span class="arrow"></span></th>
-                            <th class="sortable num" data-sort="perkwh">Price/kWh <span class="arrow"></span></th>
-                            <th class="num">Actions</th>
+                            <th class="sortable" data-sort="date"><span data-i18n="th_date">Date</span> <span class="arrow"></span></th>
+                            <th class="sortable" data-sort="vehicle"><span data-i18n="th_vehicle">Vehicle</span> <span class="arrow"></span></th>
+                            <th class="sortable" data-sort="type"><span data-i18n="th_type">Type</span> <span class="arrow"></span></th>
+                            <th class="sortable" data-sort="location"><span data-i18n="th_location">Location</span> <span class="arrow"></span></th>
+                            <th class="sortable num" data-sort="energy"><span data-i18n="th_energy">Energy (kWh)</span> <span class="arrow"></span></th>
+                            <th class="sortable num" data-sort="cost"><span data-i18n="th_cost">Cost</span> <span class="arrow"></span></th>
+                            <th class="sortable num" data-sort="perkwh"><span data-i18n="th_perkwh">Price/kWh</span> <span class="arrow"></span></th>
+                            <th class="num" data-i18n="th_actions">Actions</th>
                         </tr>
                     </thead>
                     <tbody id="invoice-table-body">
-                        <tr><td colspan="8" class="center">Loading data…</td></tr>
+                        <tr><td colspan="8" class="center" data-i18n="loading_data">Loading data…</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -543,62 +565,77 @@
         <section id="tab-files" hidden>
             <div class="panel panel-pad">
                 <div class="browser-header">
-                    <h2 class="panel-title" style="margin:0;">Stored files</h2>
+                    <h2 class="panel-title" style="margin:0;" data-i18n="files_title">Stored files</h2>
                     <div style="display:flex; gap:0.5rem; align-items:center;">
                         <span id="files-browser-status" style="color: var(--muted); font-size:0.8rem;"></span>
-                        <button id="files-refresh-btn" class="btn" type="button">Refresh</button>
+                        <button id="files-refresh-btn" class="btn" type="button" data-i18n="files_refresh">Refresh</button>
                     </div>
                 </div>
                 <div class="browser-panes">
                     <div id="files-browser-list" class="browser-list"></div>
-                    <div id="files-browser-preview" class="browser-preview">Select a file to preview its contents.</div>
+                    <div id="files-browser-preview" class="browser-preview" data-i18n="files_select">Select a file to preview its contents.</div>
                 </div>
             </div>
         </section>
 
         <section id="tab-maintenance" hidden>
             <div class="panel maint-section">
-                <h3>Sync</h3>
-                <p>
+                <h3 data-i18n="account_title">Tesla account</h3>
+                <p data-i18n="account_text">
+                    Sign in with your Tesla account to let the app download your invoices. The login
+                    happens on Tesla's own website; only the resulting token is stored, encrypted at rest,
+                    and used to fetch invoices. No password is ever seen by this app.
+                </p>
+                <p class="account-state">
+                    <span data-i18n="account_status_label">Status:</span>
+                    <b id="account-status">-</b>
+                </p>
+                <button id="connect-btn" class="btn primary" type="button" data-i18n="btn_connect">Connect Tesla account</button>
+                <span id="connect-status" class="maint-status"></span>
+            </div>
+
+            <div class="panel maint-section">
+                <h3 data-i18n="maint_sync_title">Sync</h3>
+                <p data-i18n="maint_sync_text">
                     New invoices for the current and previous month are fetched automatically.
                     A full sync downloads the entire charging and subscription history and can take a while.
                     If the automatic email export is enabled, you will be asked whether the invoices
                     found by this sync should also be emailed (default: no).
                 </p>
-                <button id="sync-btn" class="btn primary" type="button">Sync all history</button>
+                <button id="sync-btn" class="btn primary" type="button" data-i18n="btn_sync_all">Sync all history</button>
                 <span id="sync-status" class="maint-status"></span>
             </div>
 
             <div class="panel maint-section">
-                <h3>Email backlog</h3>
-                <p>
+                <h3 data-i18n="maint_backlog_title">Email backlog</h3>
+                <p data-i18n="maint_backlog_text">
                     Invoices synced while email export was disabled (or during a sync with email sending
-                    skipped) are marked as <i>skipped</i> and never emailed automatically. Send them here
+                    skipped) are marked as skipped and never emailed automatically. Send them here
                     as a combined export — batched into a few emails instead of one mail per invoice.
                 </p>
-                <button id="send-skipped-btn" class="btn primary" type="button" disabled>Send skipped invoices</button>
+                <button id="send-skipped-btn" class="btn primary" type="button" disabled data-i18n="btn_send_skipped">Send skipped invoices</button>
                 <span id="send-skipped-status" class="maint-status"></span>
             </div>
 
             <div class="panel maint-section">
-                <h3>Re-scan PDFs</h3>
-                <p>
+                <h3 data-i18n="maint_rescan_title">Re-scan PDFs</h3>
+                <p data-i18n="maint_rescan_text">
                     Re-extracts cost and currency from the stored subscription PDFs with the current
                     parser. Useful after an app update when older metadata contains wrong values.
                     Charging figures come from the Tesla API and are refreshed by a sync instead.
                 </p>
-                <button id="rescan-btn" class="btn primary" type="button">Re-scan PDFs</button>
+                <button id="rescan-btn" class="btn primary" type="button" data-i18n="btn_rescan">Re-scan PDFs</button>
                 <span id="rescan-status" class="maint-status"></span>
             </div>
 
             <div class="panel maint-section">
-                <h3>Sync status</h3>
+                <h3 data-i18n="status_title">Sync status</h3>
                 <dl class="sync-info">
-                    <dt>Running</dt><dd id="info-running">-</dd>
-                    <dt>Last sync</dt><dd id="info-last-finished">-</dd>
-                    <dt>Last kind</dt><dd id="info-last-kind">-</dd>
-                    <dt>Last result</dt><dd id="info-last-result">-</dd>
-                    <dt>Last success</dt><dd id="info-last-success">-</dd>
+                    <dt data-i18n="status_running">Running</dt><dd id="info-running">-</dd>
+                    <dt data-i18n="status_last_sync">Last sync</dt><dd id="info-last-finished">-</dd>
+                    <dt data-i18n="status_last_kind">Last kind</dt><dd id="info-last-kind">-</dd>
+                    <dt data-i18n="status_last_result">Last result</dt><dd id="info-last-result">-</dd>
+                    <dt data-i18n="status_last_success">Last success</dt><dd id="info-last-success">-</dd>
                 </dl>
             </div>
         </section>
@@ -611,7 +648,7 @@
         <span>·</span>
         <a href="https://github.com/aSauerwein" target="_blank" rel="noopener">github.com/aSauerwein</a>
         <span>·</span>
-        <span>Not affiliated with Tesla, Inc.</span>
+        <span data-i18n="footer_disclaimer">Not affiliated with Tesla, Inc.</span>
     </footer>
 
     <div id="pdf-modal" class="modal" hidden>
@@ -619,12 +656,29 @@
             <div class="modal-head">
                 <span class="title" id="pdf-modal-title">Invoice</span>
                 <div class="actions">
-                    <a id="pdf-modal-dl" class="btn" download>Download</a>
-                    <button id="pdf-modal-close" class="btn" type="button">Close</button>
+                    <a id="pdf-modal-dl" class="btn" download data-i18n="action_download">Download</a>
+                    <button id="pdf-modal-close" class="btn" type="button" data-i18n="pdf_close">Close</button>
                 </div>
             </div>
             <div class="modal-body">
                 <iframe id="pdf-modal-frame" title="Invoice PDF"></iframe>
+            </div>
+        </div>
+    </div>
+
+    <div id="auth-modal" class="modal" hidden>
+        <div class="modal-box dialog-box">
+            <div class="modal-head"><span class="title" data-i18n="auth_dlg_title">Connect Tesla account</span></div>
+            <div class="dialog-body">
+                <p data-i18n="auth_step1">1. Open the Tesla login in a new tab and sign in with your Tesla account. You may be asked to solve a security check — that is Tesla's, not this app's.</p>
+                <a id="auth-open-btn" class="btn primary" href="#" target="_blank" rel="noopener" data-i18n="auth_open_login">Open Tesla login</a>
+                <p style="margin-top:1rem;" data-i18n="auth_step2">2. After signing in you land on a "Page Not Found" page. Copy that page's full web address from your browser's address bar and paste it here:</p>
+                <input id="auth-input" type="text" placeholder="https://auth.tesla.com/void/callback?code=..." autocomplete="off">
+                <p id="auth-error" class="dialog-error" hidden></p>
+            </div>
+            <div class="dialog-actions">
+                <button id="auth-cancel" class="btn" type="button" data-i18n="cancel">Cancel</button>
+                <button id="auth-complete" class="btn primary" type="button" data-i18n="btn_auth_complete">Connect</button>
             </div>
         </div>
     </div>
@@ -658,6 +712,8 @@
         const API_FILES = 'api/files';
         const API_RESCAN = 'api/files/rescan';
         const API_SEND_SKIPPED = 'api/email/send-skipped';
+        const API_AUTH_START = 'api/auth/login/start';
+        const API_AUTH_COMPLETE = 'api/auth/login/complete';
 
         // ---------- theme (Auto / Light / Dark) ----------
 
@@ -692,6 +748,293 @@
             try { return localStorage.getItem(THEME_KEY) || 'auto'; } catch (e) { return 'auto'; }
         })());
 
+        // ---------- language (EN / DE) ----------
+        // Precedence: user's toggle choice (per browser) > server default
+        // (HA language / LANGUAGE env var, arrives with the analytics data)
+        // > browser language. English is the fallback and also the source of
+        // truth for missing keys.
+
+        const LANG_KEY = 'tesla-invoices-lang';
+
+        const I18N = {
+            en: {
+                theme_auto: 'Auto', theme_light: 'Light', theme_dark: 'Dark',
+                chip_loading: 'Loading…',
+                chip_running: 'Sync running…',
+                chip_last: 'Last sync: {time}',
+                chip_none: 'No successful sync yet',
+                banner_failed: 'Last sync failed: {error}',
+                tab_dashboard: 'Dashboard', tab_files: 'Files', tab_maintenance: 'Maintenance',
+                search_placeholder: 'Search location, vehicle, file…',
+                all_years: 'All years', all_vehicles: 'All vehicles', all_types: 'All types',
+                type_charging: 'Charging', type_subscription: 'Subscription',
+                export_csv: 'Export CSV', download_zip: 'Download all (ZIP)',
+                card_invoices: 'Invoices', card_energy: 'Energy Charged',
+                card_cost: 'Total Cost', card_vehicles: 'Vehicles',
+                cost_note: '+ invoices in {currencies} (not converted)',
+                chart_energy: 'Energy per month', chart_cost: 'Cost per month',
+                chart_total: 'Total', chart_empty: 'No data for the current filters.',
+                th_date: 'Date', th_vehicle: 'Vehicle', th_type: 'Type', th_location: 'Location',
+                th_energy: 'Energy (kWh)', th_cost: 'Cost', th_perkwh: 'Price/kWh', th_actions: 'Actions',
+                loading_data: 'Loading data…',
+                no_invoices: 'No invoices found. Run "Sync all history" on the Maintenance tab to fetch older invoices.',
+                no_match: 'No invoices match the current filters.',
+                no_token: 'No Tesla account connected yet. Use "Connect Tesla account" on the Maintenance tab (or the banner above) to get started.',
+                load_failed: 'Failed to load data. See browser console for details.',
+                unknown: 'Unknown',
+                action_view: 'View', action_download: 'Download', action_email: 'Email',
+                action_resend: 'Re-send', action_delete: 'Delete',
+                sending: 'Sending…', sent_check: 'Sent ✓',
+                files_title: 'Stored files', files_refresh: 'Refresh',
+                files_select: 'Select a file to preview its contents.',
+                files_count: '{n} file(s), newest invoice first',
+                files_empty: 'No files have been stored yet.',
+                files_load_failed: 'Failed to load files.',
+                files_preview_failed: 'Unable to load stored files.',
+                no_preview: '(no preview available)',
+                maint_sync_title: 'Sync',
+                maint_sync_text: 'New invoices for the current and previous month are fetched automatically. '
+                    + 'A full sync downloads the entire charging and subscription history and can take a while. '
+                    + 'If the automatic email export is enabled, you will be asked whether the invoices found '
+                    + 'by this sync should also be emailed (default: no).',
+                btn_sync_all: 'Sync all history',
+                maint_backlog_title: 'Email backlog',
+                maint_backlog_text: 'Invoices synced while email export was disabled (or during a sync with '
+                    + 'email sending skipped) are marked as skipped and never emailed automatically. Send them '
+                    + 'here as a combined export — batched into a few emails instead of one mail per invoice.',
+                btn_send_skipped: 'Send skipped invoices',
+                btn_send_skipped_n: 'Send {n} skipped invoice(s)',
+                maint_rescan_title: 'Re-scan PDFs',
+                maint_rescan_text: 'Re-extracts cost and currency from the stored subscription PDFs with the '
+                    + 'current parser. Useful after an app update when older metadata contains wrong values. '
+                    + 'Charging figures come from the Tesla API and are refreshed by a sync instead.',
+                btn_rescan: 'Re-scan PDFs',
+                status_title: 'Sync status', status_running: 'Running', status_last_sync: 'Last sync',
+                status_last_kind: 'Last kind', status_last_result: 'Last result', status_last_success: 'Last success',
+                yes: 'yes', no: 'no',
+                sync_starting: 'Starting sync…',
+                sync_started: 'Sync started – this can take a while.',
+                sync_already: 'A sync is already running.',
+                sync_failed_start: 'Failed to start sync.',
+                rescan_running: 'Re-scanning…',
+                rescan_updated: 'Updated {n} file(s).',
+                rescan_failed: 'Re-scan failed.',
+                rescan_conflict: 'A sync is running — try again when it has finished.',
+                sent_summary: 'Sent {n} invoice(s) in {m} email(s).',
+                send_failed: 'Sending failed: {error}',
+                email_not_configured: 'Email is not configured (from/mailserver missing).',
+                no_skipped: 'No skipped invoices.',
+                dlg_email_title: 'Email invoice',
+                dlg_email_msg: 'Send "{file}" by email to:',
+                dlg_backlog_msg: 'Send all skipped invoices (combined) by email to:',
+                btn_send: 'Send', cancel: 'Cancel', ok: 'OK', error_title: 'Error',
+                invalid_email: 'Please enter a valid email address.',
+                dlg_sync_title: 'Sync all history',
+                dlg_sync_msg: 'Download the complete invoice history? This can take a while.',
+                dlg_sync_check: 'Also email each new invoice found by this sync '
+                    + '(unchecked: mark them as skipped, sendable later via "Email backlog")',
+                btn_start_sync: 'Start sync',
+                dlg_delete_title: 'Delete file',
+                dlg_delete_pdf: 'Delete "{file}"?\n\nIts metadata entry is deleted too, and the PDF will be '
+                    + 'downloaded again on the next sync as long as its invoice exists at Tesla.',
+                dlg_delete_json: 'Delete "{file}"?\n\nThis is a metadata file: without it the invoice looks '
+                    + 'brand new again — if automatic email export is enabled, it may be emailed a second time.',
+                delete_failed: 'Deleting failed: {error}',
+                pdf_close: 'Close',
+                footer_disclaimer: 'Not affiliated with Tesla, Inc.',
+                setup_banner_text: 'Welcome! Connect your Tesla account to start downloading your invoices — no configuration needed.',
+                btn_connect: 'Connect Tesla account',
+                btn_reconnect: 'Reconnect Tesla account',
+                account_title: 'Tesla account',
+                account_text: 'Sign in with your Tesla account to let the app download your invoices. The login '
+                    + 'happens on Tesla\'s own website; only the resulting token is stored (with strict file '
+                    + 'permissions) and used to fetch invoices. Your password is never seen by this app.',
+                account_status_label: 'Status:',
+                account_connected: 'Connected',
+                account_disconnected: 'Not connected',
+                auth_dlg_title: 'Connect Tesla account',
+                auth_step1: '1. Open the Tesla login in a new tab and sign in with your Tesla account. You may be '
+                    + 'asked to solve a security check — that is Tesla\'s, not this app\'s.',
+                auth_open_login: 'Open Tesla login',
+                auth_step2: '2. After signing in you land on a "Page Not Found" page. Copy that page\'s full web '
+                    + 'address from your browser\'s address bar and paste it here:',
+                btn_auth_complete: 'Connect',
+                auth_connecting: 'Connecting…',
+                auth_success: 'Connected — fetching your invoices now…',
+                auth_no_code: 'That address does not contain a login code. Copy the full address of the '
+                    + '"Page Not Found" page after signing in.',
+                auth_failed: 'Login failed: {error}',
+            },
+            de: {
+                theme_auto: 'Auto', theme_light: 'Hell', theme_dark: 'Dunkel',
+                chip_loading: 'Lädt…',
+                chip_running: 'Synchronisierung läuft…',
+                chip_last: 'Letzter Sync: {time}',
+                chip_none: 'Noch kein erfolgreicher Sync',
+                banner_failed: 'Letzter Sync fehlgeschlagen: {error}',
+                tab_dashboard: 'Dashboard', tab_files: 'Dateien', tab_maintenance: 'Wartung',
+                search_placeholder: 'Standort, Fahrzeug, Datei suchen…',
+                all_years: 'Alle Jahre', all_vehicles: 'Alle Fahrzeuge', all_types: 'Alle Typen',
+                type_charging: 'Laden', type_subscription: 'Abo',
+                export_csv: 'CSV exportieren', download_zip: 'Alle herunterladen (ZIP)',
+                card_invoices: 'Rechnungen', card_energy: 'Geladene Energie',
+                card_cost: 'Gesamtkosten', card_vehicles: 'Fahrzeuge',
+                cost_note: '+ Rechnungen in {currencies} (nicht umgerechnet)',
+                chart_energy: 'Energie pro Monat', chart_cost: 'Kosten pro Monat',
+                chart_total: 'Gesamt', chart_empty: 'Keine Daten für die aktuellen Filter.',
+                th_date: 'Datum', th_vehicle: 'Fahrzeug', th_type: 'Typ', th_location: 'Standort',
+                th_energy: 'Energie (kWh)', th_cost: 'Kosten', th_perkwh: 'Preis/kWh', th_actions: 'Aktionen',
+                loading_data: 'Daten werden geladen…',
+                no_invoices: 'Keine Rechnungen gefunden. Ältere Rechnungen lassen sich über „Gesamte Historie synchronisieren“ (Wartung) laden.',
+                no_match: 'Keine Rechnungen entsprechen den aktuellen Filtern.',
+                no_token: 'Noch kein Tesla-Konto verbunden. Über „Tesla-Konto verbinden“ im Reiter Wartung (oder das Banner oben) starten.',
+                load_failed: 'Daten konnten nicht geladen werden. Details in der Browser-Konsole.',
+                unknown: 'Unbekannt',
+                action_view: 'Ansehen', action_download: 'Herunterladen', action_email: 'E-Mail',
+                action_resend: 'Erneut senden', action_delete: 'Löschen',
+                sending: 'Wird gesendet…', sent_check: 'Gesendet ✓',
+                files_title: 'Gespeicherte Dateien', files_refresh: 'Aktualisieren',
+                files_select: 'Datei auswählen, um die Vorschau zu sehen.',
+                files_count: '{n} Datei(en), neueste Rechnung zuerst',
+                files_empty: 'Noch keine Dateien gespeichert.',
+                files_load_failed: 'Dateien konnten nicht geladen werden.',
+                files_preview_failed: 'Gespeicherte Dateien konnten nicht geladen werden.',
+                no_preview: '(keine Vorschau verfügbar)',
+                maint_sync_title: 'Synchronisierung',
+                maint_sync_text: 'Neue Rechnungen des aktuellen und des Vormonats werden automatisch abgerufen. '
+                    + 'Ein vollständiger Sync lädt die gesamte Lade- und Abo-Historie und kann eine Weile dauern. '
+                    + 'Wenn der automatische E-Mail-Export aktiviert ist, wird gefragt, ob die gefundenen '
+                    + 'Rechnungen auch per E-Mail versendet werden sollen (Standard: nein).',
+                btn_sync_all: 'Gesamte Historie synchronisieren',
+                maint_backlog_title: 'E-Mail-Rückstand',
+                maint_backlog_text: 'Rechnungen, die synchronisiert wurden, während der E-Mail-Export deaktiviert '
+                    + 'war (oder bei einem Sync mit übersprungenem Versand), sind als übersprungen markiert und '
+                    + 'werden nie automatisch versendet. Hier lassen sie sich als Sammel-Export senden — '
+                    + 'gebündelt in wenige E-Mails statt einer pro Rechnung.',
+                btn_send_skipped: 'Übersprungene Rechnungen senden',
+                btn_send_skipped_n: '{n} übersprungene Rechnung(en) senden',
+                maint_rescan_title: 'PDFs neu scannen',
+                maint_rescan_text: 'Extrahiert Kosten und Währung aus den gespeicherten Abo-PDFs mit dem '
+                    + 'aktuellen Parser neu. Nützlich nach einem Update, wenn ältere Metadaten falsche Werte '
+                    + 'enthalten. Ladedaten stammen aus der Tesla-API und werden durch einen Sync aktualisiert.',
+                btn_rescan: 'PDFs neu scannen',
+                status_title: 'Sync-Status', status_running: 'Läuft', status_last_sync: 'Letzter Sync',
+                status_last_kind: 'Letzte Art', status_last_result: 'Letztes Ergebnis', status_last_success: 'Letzter Erfolg',
+                yes: 'ja', no: 'nein',
+                sync_starting: 'Sync wird gestartet…',
+                sync_started: 'Sync gestartet – das kann eine Weile dauern.',
+                sync_already: 'Es läuft bereits ein Sync.',
+                sync_failed_start: 'Sync konnte nicht gestartet werden.',
+                rescan_running: 'Wird neu gescannt…',
+                rescan_updated: '{n} Datei(en) aktualisiert.',
+                rescan_failed: 'Neu-Scan fehlgeschlagen.',
+                rescan_conflict: 'Es läuft gerade ein Sync — bitte danach erneut versuchen.',
+                sent_summary: '{n} Rechnung(en) in {m} E-Mail(s) gesendet.',
+                send_failed: 'Senden fehlgeschlagen: {error}',
+                email_not_configured: 'E-Mail ist nicht konfiguriert (Absender/Mailserver fehlt).',
+                no_skipped: 'Keine übersprungenen Rechnungen.',
+                dlg_email_title: 'Rechnung per E-Mail senden',
+                dlg_email_msg: '„{file}“ per E-Mail senden an:',
+                dlg_backlog_msg: 'Alle übersprungenen Rechnungen (gebündelt) per E-Mail senden an:',
+                btn_send: 'Senden', cancel: 'Abbrechen', ok: 'OK', error_title: 'Fehler',
+                invalid_email: 'Bitte eine gültige E-Mail-Adresse eingeben.',
+                dlg_sync_title: 'Gesamte Historie synchronisieren',
+                dlg_sync_msg: 'Die komplette Rechnungshistorie herunterladen? Das kann eine Weile dauern.',
+                dlg_sync_check: 'Jede neu gefundene Rechnung auch per E-Mail senden (deaktiviert: als '
+                    + 'übersprungen markieren, später über „E-Mail-Rückstand“ sendbar)',
+                btn_start_sync: 'Sync starten',
+                dlg_delete_title: 'Datei löschen',
+                dlg_delete_pdf: '„{file}“ löschen?\n\nDer Metadaten-Eintrag wird mit gelöscht; das PDF wird beim '
+                    + 'nächsten Sync erneut heruntergeladen, solange die Rechnung bei Tesla existiert.',
+                dlg_delete_json: '„{file}“ löschen?\n\nDies ist eine Metadaten-Datei: Ohne sie wirkt die Rechnung '
+                    + 'wie neu — bei aktiviertem E-Mail-Export wird sie ggf. ein zweites Mal versendet.',
+                delete_failed: 'Löschen fehlgeschlagen: {error}',
+                pdf_close: 'Schließen',
+                footer_disclaimer: 'Nicht mit Tesla, Inc. verbunden.',
+                setup_banner_text: 'Willkommen! Verbinde dein Tesla-Konto, um deine Rechnungen herunterzuladen — ganz ohne Konfiguration.',
+                btn_connect: 'Tesla-Konto verbinden',
+                btn_reconnect: 'Tesla-Konto neu verbinden',
+                account_title: 'Tesla-Konto',
+                account_text: 'Melde dich mit deinem Tesla-Konto an, damit die App deine Rechnungen herunterladen '
+                    + 'kann. Die Anmeldung erfolgt auf der Website von Tesla; nur der daraus entstehende Token '
+                    + 'wird gespeichert (mit strengen Dateiberechtigungen) und zum Abrufen der Rechnungen '
+                    + 'verwendet. Dein Passwort sieht diese App nie.',
+                account_status_label: 'Status:',
+                account_connected: 'Verbunden',
+                account_disconnected: 'Nicht verbunden',
+                auth_dlg_title: 'Tesla-Konto verbinden',
+                auth_step1: '1. Öffne die Tesla-Anmeldung in einem neuen Tab und melde dich mit deinem Tesla-Konto '
+                    + 'an. Möglicherweise musst du eine Sicherheitsabfrage lösen — die stammt von Tesla, nicht '
+                    + 'von dieser App.',
+                auth_open_login: 'Tesla-Anmeldung öffnen',
+                auth_step2: '2. Nach der Anmeldung landest du auf einer Seite „Seite nicht gefunden“. Kopiere die '
+                    + 'vollständige Web-Adresse dieser Seite aus der Adresszeile deines Browsers und füge sie hier ein:',
+                btn_auth_complete: 'Verbinden',
+                auth_connecting: 'Wird verbunden…',
+                auth_success: 'Verbunden — deine Rechnungen werden jetzt abgerufen…',
+                auth_no_code: 'Diese Adresse enthält keinen Anmelde-Code. Kopiere die vollständige Adresse der '
+                    + 'Seite „Seite nicht gefunden“ nach der Anmeldung.',
+                auth_failed: 'Anmeldung fehlgeschlagen: {error}',
+            },
+        };
+
+        let serverLang = '';
+        let lang = 'en';
+
+        function t(key, params) {
+            let text = (I18N[lang] && I18N[lang][key]) ?? I18N.en[key] ?? key;
+            if (params) {
+                for (const [name, value] of Object.entries(params)) {
+                    text = text.replaceAll('{' + name + '}', value);
+                }
+            }
+            return text;
+        }
+
+        function storedLang() {
+            try { return localStorage.getItem(LANG_KEY) || ''; } catch (e) { return ''; }
+        }
+
+        function defaultLang() {
+            const candidate = serverLang || (navigator.language || 'en').slice(0, 2).toLowerCase();
+            return I18N[candidate] ? candidate : 'en';
+        }
+
+        function translatePage() {
+            document.documentElement.lang = lang;
+            document.querySelectorAll('[data-i18n]').forEach((el) => {
+                el.textContent = t(el.dataset.i18n);
+            });
+            document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
+                el.placeholder = t(el.dataset.i18nPlaceholder);
+            });
+        }
+
+        function setLanguage(newLang, rerender) {
+            lang = I18N[newLang] ? newLang : 'en';
+            document.querySelectorAll('[data-lang-choice]').forEach((btn) => {
+                btn.classList.toggle('active', btn.dataset.langChoice === lang);
+            });
+            translatePage();
+            if (rerender) {
+                // Re-render everything that holds dynamic, translated text
+                populateFilterOptions();
+                renderSyncState();
+                renderEmailControls();
+                renderAccountState();
+                applyFilters();
+                if (filesLoaded) loadFiles();
+            }
+        }
+
+        document.querySelectorAll('[data-lang-choice]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                try { localStorage.setItem(LANG_KEY, btn.dataset.langChoice); } catch (e) { /* not persisted */ }
+                setLanguage(btn.dataset.langChoice, true);
+            });
+        });
+        setLanguage(storedLang() || defaultLang(), false);
+
         // ---------- API + dialogs ----------
 
         // Custom header on every mutating request: the backend rejects
@@ -706,7 +1049,7 @@
         // dialogs are unreliable in embedded webviews (HA companion app),
         // where they can silently return null and make buttons appear dead.
         // Resolves to { value, checked } on OK, or null on cancel.
-        function showDialog({ title, message, okLabel = 'OK', cancelLabel = 'Cancel', hideCancel = false,
+        function showDialog({ title, message, okLabel = t('ok'), cancelLabel = t('cancel'), hideCancel = false,
                               input = null, checkbox = null, validate = null }) {
             const modal = document.getElementById('app-dialog');
             const inputEl = document.getElementById('dialog-input');
@@ -766,10 +1109,10 @@
         }
 
         function showError(message) {
-            return showDialog({ title: 'Error', message, okLabel: 'OK', hideCancel: true });
+            return showDialog({ title: t('error_title'), message, hideCancel: true });
         }
 
-        const validEmail = (v) => v.includes('@') ? '' : 'Please enter a valid email address.';
+        const validEmail = (v) => v.includes('@') ? '' : t('invalid_email');
 
         let allData = [];
         let summary = {};
@@ -794,8 +1137,9 @@
             return (dateStr || '').slice(0, 7); // YYYY-MM
         }
 
+        // Numbers and month labels follow the UI language (de: 1.234,56)
         function fmtMoney(value) {
-            return (value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            return (value || 0).toLocaleString(lang, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         }
 
         // Per-line effective price per kWh (own currency); null when not applicable.
@@ -887,12 +1231,12 @@
             }
 
             document.getElementById('stat-count').textContent = data.length;
-            document.getElementById('stat-kwh').textContent = kwh.toLocaleString(undefined, { maximumFractionDigits: 1 }) + ' kWh';
+            document.getElementById('stat-kwh').textContent = kwh.toLocaleString(lang, { maximumFractionDigits: 1 }) + ' kWh';
             document.getElementById('stat-cost').textContent = fmtMoney(costPrimary) + ' ' + primary;
 
             const others = [...currencies].filter((c) => c && c !== primary);
             document.getElementById('stat-cost-note').textContent =
-                others.length ? '+ invoices in ' + others.join(', ') + ' (not converted)' : '';
+                others.length ? t('cost_note', { currencies: others.join(', ') }) : '';
 
             document.getElementById('stat-vehicles').textContent = [...vehicles].filter(Boolean).length;
         }
@@ -947,13 +1291,13 @@
         }
 
         function fmtAxis(value) {
-            if (value >= 1000) return (value / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 }) + 'k';
-            return value.toLocaleString(undefined, { maximumFractionDigits: value < 10 ? 1 : 0 });
+            if (value >= 1000) return (value / 1000).toLocaleString(lang, { maximumFractionDigits: 1 }) + 'k';
+            return value.toLocaleString(lang, { maximumFractionDigits: value < 10 ? 1 : 0 });
         }
 
         function monthLabel(key) {
             const [y, m] = key.split('-');
-            return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString([], { month: 'short', year: '2-digit' });
+            return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString(lang, { month: 'short', year: '2-digit' });
         }
 
         function renderBarChart(containerId, captionId, buckets, color, unit) {
@@ -964,14 +1308,14 @@
                 caption.textContent = '';
                 const empty = document.createElement('div');
                 empty.className = 'chart-empty';
-                empty.textContent = 'No data for the current filters.';
+                empty.textContent = t('chart_empty');
                 container.appendChild(empty);
                 return;
             }
 
             const total = buckets.reduce((s, b) => s + b.value, 0);
-            const fmtVal = (v) => v.toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' ' + unit;
-            const defaultCaption = () => { caption.innerHTML = 'Total <b>' + fmtVal(total) + '</b>'; };
+            const fmtVal = (v) => v.toLocaleString(lang, { maximumFractionDigits: 2 }) + ' ' + unit;
+            const defaultCaption = () => { caption.innerHTML = t('chart_total') + ' <b>' + fmtVal(total) + '</b>'; };
             defaultCaption();
 
             const W = 480, H = 190, padL = 38, padR = 6, padB = 24, padT = 10;
@@ -1063,7 +1407,7 @@
                 'var(--accent)', 'kWh'
             );
             document.getElementById('chart-cost-title').textContent =
-                'Cost per month' + (primary ? ' (' + primary + ')' : '');
+                t('chart_cost') + (primary ? ' (' + primary + ')' : '');
             renderBarChart(
                 'chart-cost', 'caption-cost',
                 monthlyBuckets(data.filter((d) => (d.currency || '') === primary), (d) => d.total_cost || 0, range),
@@ -1105,8 +1449,8 @@
             tbody.replaceChildren();
             if (data.length === 0) {
                 tbody.appendChild(messageRow(allData.length === 0
-                    ? 'No invoices found. Run "Sync all history" on the Maintenance tab to fetch older invoices.'
-                    : 'No invoices match the current filters.'));
+                    ? (summary.token_configured === false ? t('no_token') : t('no_invoices'))
+                    : t('no_match')));
                 return;
             }
 
@@ -1125,12 +1469,12 @@
                 const isCharging = item.type === 'charging';
 
                 tr.appendChild(cell(fmtTimestamp(item.date)));
-                tr.appendChild(cell(rowVehicle(item) || 'Unknown'));
+                tr.appendChild(cell(rowVehicle(item) || t('unknown')));
 
                 const typeTd = document.createElement('td');
                 const badge = document.createElement('span');
                 badge.className = 'badge ' + (isCharging ? 'charging' : 'subscription');
-                badge.textContent = item.type || '-';
+                badge.textContent = item.type ? t('type_' + item.type) : '-';
                 typeTd.appendChild(badge);
                 tr.appendChild(typeTd);
 
@@ -1139,11 +1483,11 @@
                 locTd.title = loc; // full text on hover, since the cell truncates
                 tr.appendChild(locTd);
 
-                tr.appendChild(cell(isCharging ? (item.energy_kwh || 0).toFixed(2) : '-', 'num'));
+                tr.appendChild(cell(isCharging ? fmtMoney(item.energy_kwh) : '-', 'num'));
                 tr.appendChild(cell(fmtMoney(item.total_cost) + ' ' + (item.currency || ''), 'num'));
 
                 const rate = pricePerKwh(item);
-                tr.appendChild(cell(rate !== null ? rate.toFixed(2) + ' ' + (item.currency || '') : '-', 'num'));
+                tr.appendChild(cell(rate !== null ? fmtMoney(rate) + ' ' + (item.currency || '') : '-', 'num'));
 
                 const actionTd = document.createElement('td');
                 actionTd.className = 'num';
@@ -1153,21 +1497,21 @@
                     const view = document.createElement('button');
                     view.className = 'action';
                     view.type = 'button';
-                    view.textContent = 'View';
+                    view.textContent = t('action_view');
                     view.addEventListener('click', () => openPdf(item.filename));
                     actions.appendChild(view);
 
                     const dl = document.createElement('a');
                     dl.className = 'action';
                     dl.href = API_DOWNLOAD + encodeURIComponent(item.filename);
-                    dl.textContent = 'Download';
+                    dl.textContent = t('action_download');
                     actions.appendChild(dl);
 
                     if (summary.email_configured) {
                         const mail = document.createElement('button');
                         mail.className = 'action';
                         mail.type = 'button';
-                        mail.textContent = item.email_sent ? 'Re-send' : 'Email';
+                        mail.textContent = item.email_sent ? t('action_resend') : t('action_email');
                         mail.addEventListener('click', () => emailInvoice(item.filename, mail));
                         actions.appendChild(mail);
                     }
@@ -1209,16 +1553,16 @@
         async function emailInvoice(filename, btn) {
             // Recipient is editable per send; config's email.to is the default
             const result = await showDialog({
-                title: 'Email invoice',
-                message: 'Send "' + filename + '" by email to:',
-                okLabel: 'Send',
+                title: t('dlg_email_title'),
+                message: t('dlg_email_msg', { file: filename }),
+                okLabel: t('btn_send'),
                 input: { value: summary.email_default_to || '', placeholder: 'recipient@example.com' },
                 validate: validEmail,
             });
             if (result === null) return; // cancelled
             btn.disabled = true;
             const original = btn.textContent;
-            btn.textContent = 'Sending…';
+            btn.textContent = t('sending');
             try {
                 // Recipient in the body, not the query string (proxy logs)
                 const response = await apiFetch(API_EMAIL + encodeURIComponent(filename), {
@@ -1228,14 +1572,105 @@
                 });
                 const body = await response.json().catch(() => ({}));
                 if (!response.ok) throw new Error(body.detail || ('HTTP ' + response.status));
-                btn.textContent = 'Sent ✓';
+                btn.textContent = t('sent_check');
             } catch (error) {
                 console.error('Failed to send email:', error);
-                await showError('Sending failed: ' + error.message);
+                await showError(t('send_failed', { error: error.message }));
                 btn.textContent = original;
                 btn.disabled = false;
             }
         }
+
+        // ---------- Tesla account login ----------
+
+        // Reflect the connection state in the setup banner and the
+        // Maintenance "Tesla account" section.
+        function renderAccountState() {
+            const connected = !!summary.token_configured;
+            const banner = document.getElementById('setup-banner');
+            // The banner only nudges first-time users; once connected it is gone
+            banner.hidden = connected;
+
+            const statusEl = document.getElementById('account-status');
+            statusEl.textContent = connected ? t('account_connected') : t('account_disconnected');
+            statusEl.className = connected ? 'connected' : 'disconnected';
+            document.getElementById('connect-btn').textContent =
+                connected ? t('btn_reconnect') : t('btn_connect');
+        }
+
+        async function startAuth(statusEl) {
+            if (statusEl) statusEl.textContent = '';
+            let url;
+            try {
+                const response = await apiFetch(API_AUTH_START, { method: 'POST' });
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                url = (await response.json()).url;
+            } catch (error) {
+                console.error('Failed to start login:', error);
+                await showError(t('auth_failed', { error: error.message }));
+                return;
+            }
+
+            const modal = document.getElementById('auth-modal');
+            const input = document.getElementById('auth-input');
+            const errorEl = document.getElementById('auth-error');
+            const completeBtn = document.getElementById('auth-complete');
+            document.getElementById('auth-open-btn').href = url;
+            input.value = '';
+            errorEl.hidden = true;
+            modal.hidden = false;
+            input.focus();
+
+            function close() {
+                modal.hidden = true;
+                completeBtn.removeEventListener('click', onComplete);
+                document.getElementById('auth-cancel').removeEventListener('click', close);
+                modal.removeEventListener('click', onBackdrop);
+                document.removeEventListener('keydown', onKey);
+            }
+            function onBackdrop(e) { if (e.target === modal) close(); }
+            function onKey(e) { if (e.key === 'Escape') close(); }
+
+            async function onComplete() {
+                const value = input.value.trim();
+                if (!value) {
+                    errorEl.textContent = t('auth_no_code');
+                    errorEl.hidden = false;
+                    return;
+                }
+                completeBtn.disabled = true;
+                completeBtn.textContent = t('auth_connecting');
+                errorEl.hidden = true;
+                try {
+                    const response = await apiFetch(API_AUTH_COMPLETE, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ callback_url: value }),
+                    });
+                    const body = await response.json().catch(() => ({}));
+                    if (!response.ok) throw new Error(body.detail || ('HTTP ' + response.status));
+                    close();
+                    if (statusEl) statusEl.textContent = t('auth_success');
+                    loadData(); // token_configured flips, a first sync is already running
+                } catch (error) {
+                    console.error('Failed to complete login:', error);
+                    errorEl.textContent = t('auth_failed', { error: error.message });
+                    errorEl.hidden = false;
+                } finally {
+                    completeBtn.disabled = false;
+                    completeBtn.textContent = t('btn_auth_complete');
+                }
+            }
+
+            completeBtn.addEventListener('click', onComplete);
+            document.getElementById('auth-cancel').addEventListener('click', close);
+            modal.addEventListener('click', onBackdrop);
+            document.addEventListener('keydown', onKey);
+        }
+
+        document.getElementById('setup-connect-btn').addEventListener('click', () => startAuth(null));
+        document.getElementById('connect-btn').addEventListener('click', () =>
+            startAuth(document.getElementById('connect-status')));
 
         // ---------- filters ----------
 
@@ -1245,13 +1680,13 @@
 
             const yearSel = document.getElementById('filter-year');
             const current = yearSel.value;
-            yearSel.replaceChildren(new Option('All years', ''));
+            yearSel.replaceChildren(new Option(t('all_years'), ''));
             years.forEach((y) => yearSel.appendChild(new Option(y, y)));
             if ([...yearSel.options].some((o) => o.value === current)) yearSel.value = current;
 
             const vehicleSel = document.getElementById('filter-vehicle');
             const currentVehicle = vehicleSel.value;
-            vehicleSel.replaceChildren(new Option('All vehicles', ''));
+            vehicleSel.replaceChildren(new Option(t('all_vehicles'), ''));
             vehicles.forEach((v) => vehicleSel.appendChild(new Option(v, v)));
             if ([...vehicleSel.options].some((o) => o.value === currentVehicle)) vehicleSel.value = currentVehicle;
         }
@@ -1298,23 +1733,27 @@
             const banner = document.getElementById('sync-banner');
 
             if (syncState.running) {
-                chip.textContent = 'Sync running…';
+                chip.textContent = t('chip_running');
                 chip.classList.remove('warn');
             } else if (syncState.last_success) {
-                chip.textContent = 'Last sync: ' + fmtTimestamp(syncState.last_success);
+                chip.textContent = t('chip_last', { time: fmtTimestamp(syncState.last_success) });
                 chip.classList.remove('warn');
             } else {
-                chip.textContent = 'No successful sync yet';
+                chip.textContent = t('chip_none');
                 chip.classList.add('warn');
             }
 
-            const failed = syncState.last_result && syncState.last_result !== 'ok';
+            // On a fresh install the sync "fails" only because no account is
+            // connected yet — the friendly setup banner already covers that,
+            // so don't also raise an alarming red error banner.
+            const failed = syncState.last_result && syncState.last_result !== 'ok'
+                && summary.token_configured !== false;
             banner.hidden = !failed;
             if (failed) {
-                banner.textContent = 'Last sync failed: ' + syncState.last_result;
+                banner.textContent = t('banner_failed', { error: syncState.last_result });
             }
 
-            document.getElementById('info-running').textContent = syncState.running ? 'yes' : 'no';
+            document.getElementById('info-running').textContent = syncState.running ? t('yes') : t('no');
             document.getElementById('info-last-finished').textContent = fmtTimestamp(syncState.last_finished);
             document.getElementById('info-last-kind').textContent = syncState.last_kind || '-';
             document.getElementById('info-last-result').textContent = syncState.last_result || '-';
@@ -1333,13 +1772,19 @@
                 allData = result.data || [];
                 syncState = result.sync || {};
 
+                // Adopt the server's default language (HA language / LANGUAGE
+                // env var) unless the user has picked one via the toggle.
+                serverLang = summary.language || '';
+                if (!storedLang() && lang !== defaultLang()) setLanguage(defaultLang(), false);
+
                 populateFilterOptions();
                 renderSyncState();
                 renderEmailControls();
+                renderAccountState();
                 applyFilters();
             } catch (error) {
                 console.error('Failed to load analytics:', error);
-                tbody.replaceChildren(messageRow('Failed to load data. See browser console for details.', true));
+                tbody.replaceChildren(messageRow(t('load_failed'), true));
             }
         }
 
@@ -1354,14 +1799,14 @@
                 if (!response.ok) throw new Error('HTTP ' + response.status);
                 const result = await response.json();
                 const files = result.files || [];
-                status.textContent = files.length + ' file(s), newest invoice first';
+                status.textContent = t('files_count', { n: files.length });
                 list.replaceChildren();
-                preview.textContent = 'Select a file to preview its contents.';
+                preview.textContent = t('files_select');
 
                 if (files.length === 0) {
                     const empty = document.createElement('div');
                     empty.className = 'center';
-                    empty.textContent = 'No files have been stored yet.';
+                    empty.textContent = t('files_empty');
                     list.appendChild(empty);
                     return;
                 }
@@ -1390,20 +1835,20 @@
                         const view = document.createElement('button');
                         view.className = 'action';
                         view.type = 'button';
-                        view.textContent = 'View';
+                        view.textContent = t('action_view');
                         view.addEventListener('click', (e) => { e.stopPropagation(); openPdf(file.name); });
                         actions.appendChild(view);
                     }
                     const dl = document.createElement('a');
                     dl.className = 'action';
                     dl.href = API_DOWNLOAD + encodeURIComponent(file.name);
-                    dl.textContent = 'Download';
+                    dl.textContent = t('action_download');
                     dl.addEventListener('click', (e) => e.stopPropagation());
                     actions.appendChild(dl);
                     const del = document.createElement('button');
                     del.className = 'action danger';
                     del.type = 'button';
-                    del.textContent = 'Delete';
+                    del.textContent = t('action_delete');
                     del.addEventListener('click', (e) => { e.stopPropagation(); deleteFile(file.name); });
                     actions.appendChild(del);
 
@@ -1411,15 +1856,15 @@
                     item.addEventListener('click', () => {
                         document.querySelectorAll('.browser-item').forEach((c) => c.classList.remove('active'));
                         item.classList.add('active');
-                        preview.textContent = file.preview || '(no preview available)';
+                        preview.textContent = file.preview || t('no_preview');
                     });
                     list.appendChild(item);
                 }
             } catch (error) {
                 console.error('Failed to load files:', error);
-                status.textContent = 'Failed to load files.';
+                status.textContent = t('files_load_failed');
                 list.replaceChildren();
-                preview.textContent = 'Unable to load stored files.';
+                preview.textContent = t('files_preview_failed');
             }
         }
 
@@ -1430,15 +1875,13 @@
             const skipped = summary.email_skipped_count || 0;
             const btn = document.getElementById('send-skipped-btn');
             const status = document.getElementById('send-skipped-status');
-            btn.textContent = skipped
-                ? 'Send ' + skipped + ' skipped invoice(s)'
-                : 'Send skipped invoices';
+            btn.textContent = skipped ? t('btn_send_skipped_n', { n: skipped }) : t('btn_send_skipped');
             if (!summary.email_configured) {
                 btn.disabled = true;
-                status.textContent = 'Email is not configured (from/mailserver missing).';
+                status.textContent = t('email_not_configured');
             } else {
                 btn.disabled = skipped === 0 || btn.dataset.busy === '1';
-                if (!btn.dataset.busy) status.textContent = skipped === 0 ? 'No skipped invoices.' : '';
+                if (!btn.dataset.busy) status.textContent = skipped === 0 ? t('no_skipped') : '';
             }
         }
 
@@ -1446,16 +1889,16 @@
             const btn = document.getElementById('send-skipped-btn');
             const status = document.getElementById('send-skipped-status');
             const result = await showDialog({
-                title: 'Email backlog',
-                message: 'Send all skipped invoices (combined) by email to:',
-                okLabel: 'Send',
+                title: t('maint_backlog_title'),
+                message: t('dlg_backlog_msg'),
+                okLabel: t('btn_send'),
                 input: { value: summary.email_default_to || '', placeholder: 'recipient@example.com' },
                 validate: validEmail,
             });
             if (result === null) return; // cancelled
             btn.disabled = true;
             btn.dataset.busy = '1';
-            status.textContent = 'Sending…';
+            status.textContent = t('sending');
             try {
                 const response = await apiFetch(API_SEND_SKIPPED, {
                     method: 'POST',
@@ -1464,10 +1907,10 @@
                 });
                 const body = await response.json().catch(() => ({}));
                 if (!response.ok) throw new Error(body.detail || ('HTTP ' + response.status));
-                status.textContent = 'Sent ' + (body.sent || 0) + ' invoice(s) in ' + (body.emails || 0) + ' email(s).';
+                status.textContent = t('sent_summary', { n: body.sent || 0, m: body.emails || 0 });
             } catch (error) {
                 console.error('Failed to send skipped invoices:', error);
-                status.textContent = 'Sending failed: ' + error.message;
+                status.textContent = t('send_failed', { error: error.message });
             } finally {
                 delete btn.dataset.busy;
                 loadData();
@@ -1481,12 +1924,11 @@
             // default — marks new invoices as skipped; they can still be
             // sent later via "Email backlog".
             const result = await showDialog({
-                title: 'Sync all history',
-                message: 'Download the complete invoice history? This can take a while.',
-                okLabel: 'Start sync',
+                title: t('dlg_sync_title'),
+                message: t('dlg_sync_msg'),
+                okLabel: t('btn_start_sync'),
                 checkbox: summary.email_export_enabled
-                    ? { label: 'Also email each new invoice found by this sync '
-                        + '(unchecked: mark them as skipped, sendable later via "Email backlog")', checked: false }
+                    ? { label: t('dlg_sync_check'), checked: false }
                     : null,
             });
             if (result === null) return; // cancelled
@@ -1494,19 +1936,19 @@
             const btn = document.getElementById('sync-btn');
             const status = document.getElementById('sync-status');
             btn.disabled = true;
-            status.textContent = 'Starting sync…';
+            status.textContent = t('sync_starting');
             try {
                 const response = await apiFetch(API_SYNC + '&skip_email=' + (sendEmails ? 'false' : 'true'), { method: 'POST' });
                 if (response.status === 409) {
-                    status.textContent = 'A sync is already running.';
+                    status.textContent = t('sync_already');
                 } else if (!response.ok) {
                     throw new Error('HTTP ' + response.status);
                 } else {
-                    status.textContent = 'Sync started – this can take a while.';
+                    status.textContent = t('sync_started');
                 }
             } catch (error) {
                 console.error('Failed to start sync:', error);
-                status.textContent = 'Failed to start sync.';
+                status.textContent = t('sync_failed_start');
             } finally {
                 setTimeout(() => { btn.disabled = false; loadData(); }, 5000);
             }
@@ -1516,21 +1958,21 @@
             const btn = document.getElementById('rescan-btn');
             const status = document.getElementById('rescan-status');
             btn.disabled = true;
-            status.textContent = 'Re-scanning…';
+            status.textContent = t('rescan_running');
             try {
                 const response = await apiFetch(API_RESCAN, { method: 'POST' });
                 if (response.status === 409) {
-                    status.textContent = 'A sync is running — try again when it has finished.';
+                    status.textContent = t('rescan_conflict');
                     return;
                 }
                 if (!response.ok) throw new Error('HTTP ' + response.status);
                 const result = await response.json();
-                status.textContent = 'Updated ' + (result.updated || 0) + ' file(s).';
+                status.textContent = t('rescan_updated', { n: result.updated || 0 });
                 loadData();
                 if (filesLoaded) loadFiles();
             } catch (error) {
                 console.error('Failed to re-scan PDFs:', error);
-                status.textContent = 'Re-scan failed.';
+                status.textContent = t('rescan_failed');
             } finally {
                 btn.disabled = false;
             }
@@ -1538,12 +1980,8 @@
 
         async function deleteFile(filename) {
             const isMetadata = filename.toLowerCase().endsWith('.json');
-            const message = isMetadata
-                ? 'Delete "' + filename + '"?\n\nThis is a metadata file: without it the invoice looks '
-                    + 'brand new again — if automatic email export is enabled, it may be emailed a second time.'
-                : 'Delete "' + filename + '"?\n\nIts metadata entry is deleted too, and the PDF will be '
-                    + 'downloaded again on the next sync as long as its invoice exists at Tesla.';
-            const result = await showDialog({ title: 'Delete file', message, okLabel: 'Delete' });
+            const message = t(isMetadata ? 'dlg_delete_json' : 'dlg_delete_pdf', { file: filename });
+            const result = await showDialog({ title: t('dlg_delete_title'), message, okLabel: t('action_delete') });
             if (result === null) return; // cancelled
             try {
                 const response = await apiFetch('api/files/' + encodeURIComponent(filename), { method: 'DELETE' });
@@ -1555,7 +1993,7 @@
                 loadData(); // analytics change when a metadata sidecar is removed
             } catch (error) {
                 console.error('Failed to delete file:', error);
-                await showError('Deleting failed: ' + error.message);
+                await showError(t('delete_failed', { error: error.message }));
             }
         }
 

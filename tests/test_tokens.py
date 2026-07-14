@@ -115,6 +115,49 @@ class TestDetermineBestToken:
         with pytest.raises(TeslaAuthError):
             tm.refresh_access_token()
 
+    def test_has_token_reflects_files_and_env(self, tmp_path):
+        assert TokenManager(make_config(tmp_path)).has_token() is False
+
+        env_config = make_config(tmp_path, env_refresh_token="rt")
+        assert TokenManager(env_config).has_token() is True
+
+        file_config = make_config(tmp_path)
+        file_config.refresh_token_path.write_text("stored-token")
+        assert TokenManager(file_config).has_token() is True
+
+        # An empty token file does not count as configured
+        empty_config = make_config(tmp_path / "empty")
+        empty_config.access_token_path.parent.mkdir(parents=True, exist_ok=True)
+        empty_config.access_token_path.write_text("   ")
+        assert TokenManager(empty_config).has_token() is False
+
+    def test_exchange_authorization_code_persists_tokens(self, tmp_path, monkeypatch):
+        config = make_config(tmp_path)
+        tm = TokenManager(config)
+        monkeypatch.setattr(
+            tm,
+            "_auth_post",
+            lambda payload: {
+                "access_token": make_jwt({"iat": 200, "exp": 99999999999}),
+                "refresh_token": "new-refresh-token",
+            },
+        )
+
+        tm.exchange_authorization_code("the-code", "the-verifier")
+
+        assert tm.refresh_token == "new-refresh-token"
+        assert config.refresh_token_path.read_text() == "new-refresh-token"
+        assert config.access_token_path.read_text() == tm.access_token
+        assert tm.has_token() is True
+
+    def test_exchange_authorization_code_without_refresh_token_raises(self, tmp_path, monkeypatch):
+        config = make_config(tmp_path)
+        tm = TokenManager(config)
+        # Tesla answers 200 but without a refresh token (incomplete login)
+        monkeypatch.setattr(tm, "_auth_post", lambda payload: {"access_token": "at"})
+        with pytest.raises(TeslaAuthError):
+            tm.exchange_authorization_code("the-code", "the-verifier")
+
     def test_rotated_refresh_token_is_persisted(self, tmp_path, monkeypatch):
         config = make_config(tmp_path, env_refresh_token=make_jwt({"iat": 100}))
         tm = TokenManager(config)
