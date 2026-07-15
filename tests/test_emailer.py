@@ -338,3 +338,35 @@ def test_single_email_has_summary_body_and_subject(tmp_path, monkeypatch):
     assert "Location:  Supercharger Example" in body
     assert "Energy:    12.30 kWh" in body
     assert "Amount:    4.20 EUR" in body
+
+
+def test_send_pending_continues_after_unreadable_pdf(tmp_path, monkeypatch):
+    # An OSError on one PDF (unreadable/locked file) must not abort the
+    # loop and silently skip every invoice after it.
+    config = _email_config(tmp_path)
+    _mark_export_enabled(config)
+
+    for name in ("a_broken.pdf", "b_good.pdf"):
+        pdf = config.invoice_path / name
+        pdf.write_bytes(b"%PDF")
+        pdf.with_suffix(".json").write_text(json.dumps({"type": "charging"}))
+
+    sent = []
+    _install_dummy_smtp(monkeypatch, sent)
+
+    real_read_bytes = type(config.invoice_path).read_bytes
+
+    def flaky_read_bytes(self):
+        if self.name == "a_broken.pdf":
+            raise OSError("input/output error")
+        return real_read_bytes(self)
+
+    monkeypatch.setattr(type(config.invoice_path), "read_bytes", flaky_read_bytes)
+
+    EmailExporter(config).send_pending()
+
+    assert len(sent) == 1  # the good one went out despite the broken one
+    good_meta = json.loads((config.invoice_path / "b_good.json").read_text())
+    assert "email_sent" in good_meta
+    broken_meta = json.loads((config.invoice_path / "a_broken.json").read_text())
+    assert "email_sent" not in broken_meta  # retried on the next cycle

@@ -85,3 +85,24 @@ def test_from_ha_parses_options(tmp_path):
     assert config.env_refresh_token == "rt"
     # The HA app has no access_token option; tokens come from the refresh flow
     assert config.env_access_token == ""
+
+
+def test_disabling_both_invoice_types_is_allowed(tmp_path):
+    # Legal "downloads paused" state: syncs degrade to a connection check
+    # and the dashboard shows a banner.
+    config = make_config(tmp_path, enable_charging_invoice=False, enable_subscription_invoice=False)
+    assert config.enable_charging_invoice is False
+    assert config.enable_subscription_invoice is False
+
+
+def test_charging_invoice_env_switch(monkeypatch):
+    monkeypatch.setenv("ENABLE_CHARGING_INVOICE", "false")
+    assert Config.from_env().enable_charging_invoice is False
+    monkeypatch.delenv("ENABLE_CHARGING_INVOICE")
+    assert Config.from_env().enable_charging_invoice is True
+
+
+def test_from_ha_charging_invoice_switch(tmp_path):
+    options = tmp_path / "options.json"
+    options.write_text(json.dumps({"enable_charging_invoice": False}))
+    assert Config.from_ha(options).enable_charging_invoice is False

@@ -328,3 +328,52 @@ class TestAPIClient:
 
         with pytest.raises(TeslaAPIError):
             client.get_charging_history("VIN123")
+
+
+class TestSetRefreshToken:
+    def test_valid_token_is_verified_and_persisted(self, tmp_path, monkeypatch):
+        config = make_config(tmp_path)
+        tm = TokenManager(config)
+        new_access = make_jwt({"iat": 200, "exp": 99999999999})
+        monkeypatch.setattr(tm, "_auth_post", lambda payload: {"access_token": new_access})
+
+        tm.set_refresh_token("pasted-refresh-token")
+
+        assert config.refresh_token_path.read_text() == "pasted-refresh-token"
+        assert config.access_token_path.read_text() == new_access
+
+    def test_rotated_refresh_token_wins_over_pasted_one(self, tmp_path, monkeypatch):
+        config = make_config(tmp_path)
+        tm = TokenManager(config)
+        monkeypatch.setattr(
+            tm,
+            "_auth_post",
+            lambda payload: {
+                "access_token": make_jwt({"iat": 200, "exp": 99999999999}),
+                "refresh_token": "rotated-by-tesla",
+            },
+        )
+
+        tm.set_refresh_token("pasted-refresh-token")
+
+        assert config.refresh_token_path.read_text() == "rotated-by-tesla"
+
+    def test_invalid_token_never_replaces_working_credential(self, tmp_path, monkeypatch):
+        config = make_config(tmp_path)
+        config.refresh_token_path.write_text("working-token")
+        tm = TokenManager(config)
+        tm.refresh_token = "working-token"
+        tm.access_token = "working-access"
+
+        def fail(payload):
+            raise TeslaAuthError("Tesla rejected the token")
+
+        monkeypatch.setattr(tm, "_auth_post", fail)
+
+        with pytest.raises(TeslaAuthError):
+            tm.set_refresh_token("bogus-token")
+
+        # In-memory and persisted state both untouched
+        assert tm.refresh_token == "working-token"
+        assert tm.access_token == "working-access"
+        assert config.refresh_token_path.read_text() == "working-token"

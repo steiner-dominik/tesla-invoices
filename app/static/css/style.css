@@ -1,0 +1,528 @@
+/* Tesla Invoices dashboard styles.
+   Theming: every color comes from a CSS variable; the dark palette is
+   modeled on the Home Assistant default dark theme. It is applied when the
+   user picks "Dark", or in "Auto" mode when the system / HA companion app
+   reports a dark color scheme. The same block appears twice because CSS
+   cannot alias a selector to a media query. */
+:root {
+    color-scheme: light;
+    --bg: #f8fafc;
+    --card: #ffffff;
+    --border: #e2e8f0;
+    --text: #1e293b;
+    --muted: #64748b;
+    --accent: #2563eb;
+    --accent-soft: #eff6ff;
+    --accent-contrast: #ffffff;
+    --green: #16a34a;
+    --purple: #7e22ce;
+    --red: #dc2626;
+    --amber: #d97706;
+    --radius: 0.5rem;
+    --banner-bg: #fef2f2;
+    --banner-border: #fecaca;
+    --badge-charging-bg: #dbeafe;
+    --badge-charging-fg: #1d4ed8;
+    --badge-sub-bg: #f3e8ff;
+    --badge-sub-fg: #7e22ce;
+    --action-hover: #dbeafe;
+    --danger-soft: #fef2f2;
+    --danger-soft-hover: #fee2e2;
+    --chart-grid: #eef2f7;
+    --chart-grid-base: #cbd5e1;
+    --chart-label: #94a3b8;
+}
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #111318;
+    --card: #1c1e26;
+    --border: #2e323c;
+    --text: #e3e6eb;
+    --muted: #9aa1ad;
+    --accent: #539bf5;
+    --accent-soft: #1b2a44;
+    --accent-contrast: #0d1117;
+    --green: #4ade80;
+    --purple: #c084fc;
+    --red: #f87171;
+    --amber: #fbbf24;
+    --banner-bg: #2c191c;
+    --banner-border: #5c2a30;
+    --badge-charging-bg: #1e3a5f;
+    --badge-charging-fg: #93c5fd;
+    --badge-sub-bg: #3b2352;
+    --badge-sub-fg: #d8b4fe;
+    --action-hover: #24354f;
+    --danger-soft: #2c191c;
+    --danger-soft-hover: #3a2126;
+    --chart-grid: #262a33;
+    --chart-grid-base: #3d4351;
+    --chart-label: #7d8695;
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        color-scheme: dark;
+        --bg: #111318;
+        --card: #1c1e26;
+        --border: #2e323c;
+        --text: #e3e6eb;
+        --muted: #9aa1ad;
+        --accent: #539bf5;
+        --accent-soft: #1b2a44;
+        --accent-contrast: #0d1117;
+        --green: #4ade80;
+        --purple: #c084fc;
+        --red: #f87171;
+        --amber: #fbbf24;
+        --banner-bg: #2c191c;
+        --banner-border: #5c2a30;
+        --badge-charging-bg: #1e3a5f;
+        --badge-charging-fg: #93c5fd;
+        --badge-sub-bg: #3b2352;
+        --badge-sub-fg: #d8b4fe;
+        --action-hover: #24354f;
+        --danger-soft: #2c191c;
+        --danger-soft-hover: #3a2126;
+        --chart-grid: #262a33;
+        --chart-grid-base: #3d4351;
+        --chart-label: #7d8695;
+    }
+}
+* { box-sizing: border-box; }
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+header {
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    padding: 1rem 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+header h1 { font-size: 1.25rem; margin: 0; }
+#sync-chip {
+    font-size: 0.8rem;
+    color: var(--muted);
+    padding: 0.25rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg);
+}
+#sync-chip.warn { color: var(--amber); border-color: var(--amber); }
+.header-right { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+/* Segmented switches: Auto / Light / Dark, and the language toggle */
+.theme-toggle {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg);
+    padding: 0.15rem;
+    gap: 0.1rem;
+}
+.theme-toggle button {
+    border: none;
+    background: none;
+    color: var(--muted);
+    font-size: 0.75rem;
+    padding: 0.2rem 0.65rem;
+    border-radius: 999px;
+    cursor: pointer;
+    font-family: inherit;
+}
+.theme-toggle button.active {
+    background: var(--accent);
+    color: var(--accent-contrast);
+}
+main { max-width: 78rem; margin: 0 auto; padding: 1.5rem; }
+.banner {
+    background: var(--banner-bg);
+    border: 1px solid var(--banner-border);
+    color: var(--red);
+    border-radius: var(--radius);
+    padding: 0.75rem 1rem;
+    margin-bottom: 1.25rem;
+    font-size: 0.875rem;
+}
+/* Info banner (Tesla account setup) — accent-toned, not an error */
+.banner.info {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem 1rem;
+    flex-wrap: wrap;
+}
+/* display:flex would otherwise defeat the hidden attribute */
+.banner.info[hidden] { display: none; }
+.banner.info .btn { flex-shrink: 0; }
+/* Warning banner (downloads paused) — amber-toned, not an error */
+.banner.warn {
+    background: var(--card);
+    border-color: var(--amber);
+    color: var(--text);
+}
+.account-state { font-size: 0.85rem; color: var(--muted); }
+#account-status.connected { color: var(--green); }
+#account-status.disconnected { color: var(--amber); }
+.tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: 1.25rem;
+    border-bottom: 1px solid var(--border);
+}
+.tab-btn {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+    color: var(--muted);
+    cursor: pointer;
+}
+.tab-btn.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+}
+/* Unified surface used by cards, charts, tables, file browser, maintenance */
+.panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+.panel-pad { padding: 1rem 1.25rem; }
+.panel-title { margin: 0 0 0.75rem; font-size: 0.9rem; font-weight: 600; }
+.cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+.card { padding: 1rem 1.25rem; }
+.card h3 { margin: 0 0 0.25rem; font-size: 0.8rem; font-weight: 500; color: var(--muted); }
+.card p { margin: 0; font-size: 1.5rem; font-weight: 600; }
+.card small { color: var(--muted); font-size: 0.72rem; }
+.card p.kwh { color: var(--accent); }
+.card p.cost { color: var(--green); }
+.charts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+.chart-card { padding: 1rem 1.25rem; }
+.chart-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
+.chart-head h3 { margin: 0; font-size: 0.9rem; font-weight: 600; }
+.chart-caption { font-size: 0.78rem; color: var(--muted); min-height: 1.1rem; }
+.chart-caption b { color: var(--text); font-weight: 600; }
+.chart-card svg { width: 100%; height: auto; display: block; margin-top: 0.35rem; }
+.chart-card svg rect.bar { cursor: pointer; transition: opacity 0.1s; }
+.chart-card svg rect.bar:hover { opacity: 0.75; }
+/* Zero-value months: thin stub bar, faded so it reads as "empty".
+   Placed after the :hover rule so the fade also wins on hover. */
+.chart-card svg rect.bar.zero { opacity: 0.35; }
+/* Grid/label colors via classes so they follow the active theme */
+.chart-card svg line.grid { stroke: var(--chart-grid); }
+.chart-card svg line.grid.base { stroke: var(--chart-grid-base); }
+.chart-card svg text { fill: var(--chart-label); }
+.chart-empty { color: var(--muted); font-size: 0.85rem; padding: 2rem 0; text-align: center; }
+.filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+.filter-bar input[type="search"], .filter-bar select {
+    padding: 0.45rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 0.35rem;
+    font-size: 0.85rem;
+    background: var(--card);
+    color: var(--text);
+}
+.filter-bar input[type="search"] { flex: 1 1 12rem; min-width: 10rem; }
+.filter-bar .spacer { flex: 1; }
+.btn {
+    background: var(--card);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 0.35rem;
+    padding: 0.45rem 0.9rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+}
+.btn:hover { background: var(--bg); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
+.btn.primary:hover { opacity: 0.9; }
+.btn:disabled { opacity: 0.6; cursor: default; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+th, td { padding: 0.6rem 0.7rem; text-align: left; white-space: nowrap; vertical-align: middle; }
+th {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+}
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { color: var(--accent); }
+th .arrow { font-size: 0.65rem; }
+td { border-bottom: 1px solid var(--border); }
+tr:last-child td { border-bottom: none; }
+td.num, th.num { text-align: right; }
+/* Long site names must not stretch the table beyond the viewport:
+   truncate hard (tooltip shows the full name). 11rem keeps the whole
+   8-column table inside the 78rem container without a scrollbar. */
+td.loc { max-width: 11rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge {
+    display: inline-block;
+    padding: 0.1rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+.badge.charging { background: var(--badge-charging-bg); color: var(--badge-charging-fg); }
+.badge.subscription { background: var(--badge-sub-bg); color: var(--badge-sub-fg); }
+.row-actions { display: flex; gap: 0.35rem; justify-content: flex-end; }
+a.action, button.action {
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: none;
+    padding: 0.25rem 0.6rem;
+    border-radius: 0.35rem;
+    text-decoration: none;
+    font-size: 0.78rem;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+}
+a.action:hover, button.action:hover { background: var(--action-hover); }
+button.action:disabled { opacity: 0.5; cursor: default; }
+.center { text-align: center; color: var(--muted); padding: 2rem 1rem; }
+.error { color: var(--red); }
+/* Files tab: two-pane browser, styled consistently with the table */
+.browser-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+}
+.browser-panes {
+    display: grid;
+    grid-template-columns: minmax(15rem, 2fr) 3fr;
+    gap: 1rem;
+}
+@media (max-width: 48rem) { .browser-panes { grid-template-columns: 1fr; } }
+.browser-list {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: 0.4rem;
+    max-height: 34rem;
+    overflow-y: auto;
+}
+.browser-item {
+    padding: 0.55rem 0.75rem;
+    cursor: pointer;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    overflow-wrap: anywhere;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+.browser-item:last-child { border-bottom: none; }
+.browser-item:hover { background: var(--bg); }
+.browser-item .fname { font-size: 0.8rem; font-weight: 500; }
+.browser-item .fmeta { color: var(--muted); font-size: 0.72rem; display: flex; gap: 0.4rem; align-items: center; }
+.browser-item .factions { display: flex; gap: 0.35rem; margin-top: 0.2rem; }
+button.action.danger { color: var(--red); background: var(--danger-soft); }
+button.action.danger:hover { background: var(--danger-soft-hover); }
+.browser-item .ftag {
+    text-transform: uppercase;
+    font-size: 0.62rem;
+    letter-spacing: 0.04em;
+    padding: 0.05rem 0.35rem;
+    border-radius: 0.25rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+}
+.browser-item.active { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+.browser-preview {
+    border: 1px solid var(--border);
+    border-radius: 0.4rem;
+    background: var(--bg);
+    padding: 0.75rem;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 34rem;
+    overflow: auto;
+    font-size: 0.8rem;
+    align-self: start;
+    position: sticky;
+    top: 1rem;
+}
+/* Maintenance tab */
+.maint-section { padding: 1rem 1.25rem; margin-bottom: 1rem; }
+.maint-section h3 { margin: 0 0 0.35rem; font-size: 0.95rem; }
+.maint-section p { margin: 0 0 0.75rem; color: var(--muted); font-size: 0.85rem; }
+.maint-status { font-size: 0.8rem; color: var(--muted); margin-left: 0.5rem; }
+dl.sync-info { display: grid; grid-template-columns: auto 1fr; gap: 0.25rem 1rem; font-size: 0.85rem; margin: 0; }
+dl.sync-info dt { color: var(--muted); }
+dl.sync-info dd { margin: 0; overflow-wrap: anywhere; }
+footer {
+    max-width: 78rem;
+    margin: 0 auto;
+    padding: 0 1.5rem 1.5rem;
+    color: var(--muted);
+    font-size: 0.8rem;
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+footer a { color: var(--accent); text-decoration: none; }
+footer a:hover { text-decoration: underline; }
+/* In-app PDF viewer: stays inside the ingress webview so no HA re-login */
+.modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    z-index: 50;
+}
+.modal[hidden] { display: none; }
+.modal-box {
+    background: var(--card);
+    border-radius: var(--radius);
+    width: min(60rem, 100%);
+    height: min(90vh, 100%);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+.modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.6rem 0.9rem;
+    border-bottom: 1px solid var(--border);
+}
+.modal-head .title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.modal-head .actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
+.modal-body { flex: 1; background: #525659; min-height: 0; }
+.modal-body iframe { width: 100%; height: 100%; border: none; }
+/* Generic in-page dialog: native prompt()/confirm() are unreliable in
+   embedded webviews (HA companion app) where they can silently return
+   null and make buttons appear dead. */
+.dialog-box { width: min(26rem, 100%); height: auto; max-height: 90vh; }
+.dialog-box.wide { width: min(34rem, 100%); }
+.dialog-body { padding: 1rem 0.9rem; font-size: 0.875rem; overflow-y: auto; }
+.dialog-body p { margin: 0 0 0.75rem; white-space: pre-line; }
+.dialog-body p:last-child { margin-bottom: 0; }
+.dialog-body input[type="email"], .dialog-body input[type="text"] {
+    width: 100%;
+    padding: 0.45rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 0.35rem;
+    font-size: 0.85rem;
+    background: var(--card);
+    color: var(--text);
+}
+.dialog-body label { display: flex; gap: 0.5rem; align-items: baseline; margin-top: 0.6rem; font-size: 0.85rem; }
+/* display:flex would otherwise defeat the hidden attribute */
+.dialog-body [hidden] { display: none; }
+.dialog-error { color: var(--red); font-size: 0.8rem; margin: 0.5rem 0 0; }
+.dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding: 0.75rem 0.9rem;
+    border-top: 1px solid var(--border);
+}
+/* Tesla login dialog: method switch, numbered step cards, fallback hint */
+.method-switch { display: flex; gap: 0.4rem; margin-bottom: 0.9rem; }
+.method-switch button {
+    flex: 1;
+    background: var(--bg);
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 0.35rem;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+}
+.method-switch button.active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+.auth-steps {
+    list-style: none;
+    counter-reset: step;
+    margin: 0 0 0.9rem;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+}
+.auth-steps li {
+    counter-increment: step;
+    display: flex;
+    gap: 0.6rem;
+    align-items: flex-start;
+    font-size: 0.85rem;
+}
+.auth-steps li::before {
+    content: counter(step);
+    flex-shrink: 0;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 0.8rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.auth-steps li .btn { margin-top: 0.4rem; }
+.auth-hint {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 0.35rem;
+    padding: 0.6rem 0.75rem;
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin-bottom: 0.9rem;
+}
+.auth-hint b { color: var(--text); display: block; margin-bottom: 0.25rem; }

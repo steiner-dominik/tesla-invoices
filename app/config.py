@@ -37,6 +37,11 @@ class Config:
     env_refresh_token: str
     env_access_token: str
 
+    # Both invoice types can be switched off individually — or both at once,
+    # which turns every sync into a pure connection check (the dashboard
+    # shows a banner then). Deliberately not a config error: users may want
+    # to pause downloads without disconnecting their account.
+    enable_charging_invoice: bool = True
     # Preferred display currency in the dashboard; empty = auto-detect from
     # the invoices themselves. Costs are never converted between currencies.
     default_currency: str = ""
@@ -85,6 +90,7 @@ class Config:
             access_token_path=Path("/data/access_token.txt"),
             invoice_path=Path("/data/invoices/"),
             enable_email_export=options.get("enable_email_export", False),
+            enable_charging_invoice=options.get("enable_charging_invoice", True),
             enable_subscription_invoice=options.get("enable_subscription_invoice", True),
             polling_interval=_to_int(options.get("polling_interval", 15), "polling_interval"),
             default_currency=(options.get("default_currency") or "").strip().upper(),
@@ -115,6 +121,7 @@ class Config:
             ),
             invoice_path=Path(os.environ.get("INVOICE_PATH", "/opt/tesla-invoices/invoices/")),
             enable_email_export=os.environ.get("ENABLE_EMAIL_EXPORT", "False").lower() == "true",
+            enable_charging_invoice=os.environ.get("ENABLE_CHARGING_INVOICE", "True").lower() == "true",
             enable_subscription_invoice=os.environ.get("ENABLE_SUBSCRIPTION_INVOICE", "True").lower() == "true",
             polling_interval=_to_int(os.environ.get("POLLING_INTERVAL", "15"), "POLLING_INTERVAL"),
             default_currency=os.environ.get("DEFAULT_CURRENCY", "").strip().upper(),

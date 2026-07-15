@@ -41,3 +41,11 @@ def test_read_json_handles_missing_and_non_dict_content(tmp_path):
 
     (tmp_path / "list.json").write_text("[1, 2]")
     assert storage.read_json(tmp_path / "list.json") == {}
+
+
+def test_written_files_are_world_readable(tmp_path):
+    # mkstemp creates 0600 temp files; the rename must not keep that, or
+    # invoices on shared volumes (e.g. SMB) are unreadable for other apps.
+    path = tmp_path / "invoice.pdf"
+    storage.write_bytes_atomic(path, b"%PDF")
+    assert (path.stat().st_mode & 0o777) == 0o644

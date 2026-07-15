@@ -426,3 +426,81 @@ class TestSubscriptionInvoices:
         assert suffixed.exists()
         assert json.loads(plain.with_suffix(".json").read_text())["invoice_id"] == "INV-A"
         assert json.loads(suffixed.with_suffix(".json").read_text())["invoice_id"] == "INV-B"
+
+
+class TestLocalTimezone:
+    def test_aware_dates_use_local_month(self):
+        # An invoice at 23:00 UTC on June 30 belongs to July in Vienna —
+        # month bucketing and file names must follow the local calendar.
+        import os
+        import time
+
+        old_tz = os.environ.get("TZ")
+        os.environ["TZ"] = "Europe/Vienna"
+        time.tzset()
+        try:
+            local = InvoiceDownloader._as_local(datetime.fromisoformat("2026-06-30T23:00:00+00:00"))
+            assert (local.year, local.month, local.day) == (2026, 7, 1)
+        finally:
+            if old_tz is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = old_tz
+            time.tzset()
+
+    def test_naive_dates_stay_untouched(self):
+        # Date-only subscription invoices are already calendar dates;
+        # attaching a zone could shift them and break the UI's
+        # midnight-means-date-only display rule.
+        local = InvoiceDownloader._as_local(datetime(2026, 7, 1))
+        assert local == datetime(2026, 7, 1)
+        assert local.tzinfo is None
+
+
+class TestChargingInvoiceSwitch:
+    def test_charging_disabled_skips_charging_history(self, tmp_path):
+        config = make_config(tmp_path, enable_charging_invoice=False)
+
+        class DummyClient:
+            def get_vehicles(self):
+                return {"VIN123": {"display_name": "My Tesla"}}
+
+            def get_charging_history(self, vin):
+                raise AssertionError("charging history must not be fetched when disabled")
+
+            def get_subscription_invoices(self, vin):
+                return {"data": []}
+
+        InvoiceDownloader(config, DummyClient()).download_invoices()
+        assert not list(config.invoice_path.glob("*charging*"))
+
+    def test_both_disabled_only_checks_the_connection(self, tmp_path):
+        # Both switches off is a legal "downloads paused" state: the sync
+        # still fetches the vehicle list (token/connection check) but must
+        # not touch any invoice endpoint.
+        config = make_config(tmp_path, enable_charging_invoice=False, enable_subscription_invoice=False)
+        vehicle_calls = []
+
+        class DummyClient:
+            def get_vehicles(self):
+                vehicle_calls.append(True)
+                return {"VIN123": {"display_name": "My Tesla"}}
+
+            def get_charging_history(self, vin):
+                raise AssertionError("charging history must not be fetched when disabled")
+
+            def get_subscription_invoices(self, vin):
+                raise AssertionError("subscription invoices must not be fetched when disabled")
+
+        InvoiceDownloader(config, DummyClient()).download_invoices()
+        assert vehicle_calls  # the connection check still ran
+        assert not list(config.invoice_path.glob("*.pdf"))
+
+
+class TestExtractSessionsRobustness:
+    def test_non_dict_levels_do_not_crash(self):
+        # Tesla answering "me": null / a plain string must yield an empty
+        # list, not an AttributeError that kills the whole sync.
+        assert InvoiceDownloader._extract_charging_sessions({"data": {"me": None}}) == []
+        assert InvoiceDownloader._extract_charging_sessions({"data": {"me": "Not Found"}}) == []
+        assert InvoiceDownloader._extract_charging_sessions({"data": {"me": {"charging": 42}}}) == []

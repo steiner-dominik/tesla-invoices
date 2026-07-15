@@ -2,6 +2,7 @@ import base64
 import json
 import logging
 import ssl
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -168,6 +169,18 @@ CHARGING_HISTORY_QUERY = """
     """
 
 
+def dig(obj: Any, *keys: str) -> Any:
+    """Walk nested dicts, returning None as soon as a level is missing or not
+    a dict. Chained ``(x.get("a") or {}).get("b")`` crashes with an
+    AttributeError when Tesla returns a non-dict (e.g. ``"me": null`` becomes
+    ``{}``, but ``"me": "Not Found"`` does not)."""
+    for key in keys:
+        if not isinstance(obj, dict):
+            return None
+        obj = obj.get(key)
+    return obj
+
+
 class TeslaAuthError(Exception):
     pass
 
@@ -201,6 +214,13 @@ class TokenManager:
         self.refresh_token: str = ""
         # Access-token-only mode warns once, not on every request of a sync.
         self._expiry_warned = False
+        # Interactive logins (UI thread) and the sync loop's refreshes touch
+        # the same token state and files; without this they can interleave —
+        # e.g. a sync reading a half-rotated token pair, or two refreshes
+        # racing and one persisting an already-invalidated refresh token.
+        # RLock because refresh_access_token_if_needed calls the other
+        # locked methods.
+        self._lock = threading.RLock()
 
     @staticmethod
     def jwt_decode(token: str) -> dict[str, Any]:
@@ -273,46 +293,49 @@ class TokenManager:
         # rotated automatically), but an access token alone also works for
         # standalone users who prefer a short-lived credential — until it
         # expires. At least one of the two must be present.
-        previous_access_token = self.access_token
-        self.access_token = self._determine_best_token("access", required=False)
-        self.refresh_token = self._determine_best_token("refresh", required=False)
-        if self.access_token != previous_access_token:
-            # A new token deserves its own expiry warning.
-            self._expiry_warned = False
-        if not self.access_token and not self.refresh_token:
-            raise TeslaAuthError(
-                "No Tesla token configured. Provide a refresh token (recommended), "
-                "or an access token if you prefer a short-lived credential."
-            )
+        with self._lock:
+            previous_access_token = self.access_token
+            self.access_token = self._determine_best_token("access", required=False)
+            self.refresh_token = self._determine_best_token("refresh", required=False)
+            if self.access_token != previous_access_token:
+                # A new token deserves its own expiry warning.
+                self._expiry_warned = False
+            if not self.access_token and not self.refresh_token:
+                raise TeslaAuthError(
+                    "No Tesla token configured. Provide a refresh token (recommended), "
+                    "or an access token if you prefer a short-lived credential."
+                )
 
     def refresh_access_token_if_needed(self) -> None:
-        # In HA mode the user can paste new tokens into the app options at
-        # any time, so re-evaluate file vs. options before every cycle.
-        if self.config.homeassistant or not self.access_token:
-            self.load_tokens()
+        with self._lock:
+            # In HA mode the user can paste new tokens into the app options at
+            # any time, so re-evaluate file vs. options before every cycle.
+            if self.config.homeassistant or not self.access_token:
+                self.load_tokens()
 
-        # A missing/undecodable access token simply counts as expired (exp 0)
-        # and is bootstrapped from the refresh token below.
-        jwt_json = self.jwt_decode(self.access_token)
-        remaining = jwt_json.get("exp", 0) - time.time()
+            # A missing/undecodable access token simply counts as expired (exp 0)
+            # and is bootstrapped from the refresh token below.
+            jwt_json = self.jwt_decode(self.access_token)
+            remaining = jwt_json.get("exp", 0) - time.time()
 
-        if remaining >= TOKEN_EXPIRATION_THRESHOLD:
-            return
+            if remaining >= TOKEN_EXPIRATION_THRESHOLD:
+                return
 
-        if self.refresh_token:
-            self.refresh_access_token()
-        elif remaining <= 0:
-            raise TeslaAuthError(
-                "The Tesla access token has expired and no refresh token is configured. "
-                "Provide a fresh access token, or configure a refresh token so tokens can be renewed automatically."
-            )
-        elif not self._expiry_warned:
-            # Access-token-only mode: keep using the token until it really expires.
-            self._expiry_warned = True
-            logger.warning(
-                f"The Tesla access token expires in about {int(remaining / 60)} minutes and no refresh token "
-                "is configured — syncing will stop working then until a new token is provided"
-            )
+            if self.refresh_token:
+                self.refresh_access_token()
+            elif remaining <= 0:
+                raise TeslaAuthError(
+                    "The Tesla access token has expired and no refresh token is configured. "
+                    "Provide a fresh access token, or configure a refresh token "
+                    "so tokens can be renewed automatically."
+                )
+            elif not self._expiry_warned:
+                # Access-token-only mode: keep using the token until it really expires.
+                self._expiry_warned = True
+                logger.warning(
+                    f"The Tesla access token expires in about {int(remaining / 60)} minutes and no refresh token "
+                    "is configured — syncing will stop working then until a new token is provided"
+                )
 
     @staticmethod
     def _auth_post(payload: dict[str, str]) -> dict[str, Any]:
@@ -356,41 +379,65 @@ class TokenManager:
                 "Tesla did not return a refresh token — the login may be incomplete "
                 "or the pasted address may be missing the code"
             )
-        self.refresh_token = refresh_token
-        self._persist_token(self.config.refresh_token_path, refresh_token)
-        access_token = data.get("access_token")
-        if access_token:
-            self.access_token = access_token
-            self._persist_token(self.config.access_token_path, access_token)
-        self._expiry_warned = False
+        with self._lock:
+            self.refresh_token = refresh_token
+            self._persist_token(self.config.refresh_token_path, refresh_token)
+            access_token = data.get("access_token")
+            if access_token:
+                self.access_token = access_token
+                self._persist_token(self.config.access_token_path, access_token)
+            self._expiry_warned = False
         logger.info("Tesla login complete; refresh token stored")
 
-    def refresh_access_token(self) -> None:
-        if not self.refresh_token:
-            raise TeslaAuthError(
-                "Cannot renew the Tesla access token because no refresh token is configured"
-            )
-        logger.info("Requesting a new Tesla access token")
-        payload = {
-            "grant_type": "refresh_token",
-            "client_id": "ownerapi",
-            "refresh_token": self.refresh_token,
-            "scope": "openid email offline_access",
-        }
-        try:
-            data = self._auth_post(payload)
-        except curl_requests.exceptions.RequestException as e:
-            raise TeslaAuthError(f"Renewing the Tesla access token failed: {e}") from e
+    def set_refresh_token(self, refresh_token: str) -> None:
+        """Adopt a manually supplied refresh token (e.g. obtained with the
+        tesla_auth desktop tool or a token app) — the UI's fallback when the
+        in-app browser login is not workable. The token is verified by
+        performing a real refresh first, so a typo or an expired token can
+        never clobber a working credential."""
+        with self._lock:
+            previous_refresh = self.refresh_token
+            previous_access = self.access_token
+            self.refresh_token = refresh_token
+            try:
+                self.refresh_access_token()
+            except TeslaAuthError:
+                self.refresh_token = previous_refresh
+                self.access_token = previous_access
+                raise
+            # refresh_access_token only persists a *rotated* refresh token;
+            # when Tesla keeps the pasted one, persist it here.
+            if self.refresh_token == refresh_token:
+                self._persist_token(self.config.refresh_token_path, refresh_token)
+        logger.info("Manually supplied refresh token verified and stored")
 
-        self.access_token = data["access_token"]
-        self._persist_token(self.config.access_token_path, self.access_token)
-        # Tesla may rotate the refresh token; losing the new one would
-        # permanently break auth once the old one is invalidated.
-        new_refresh_token = data.get("refresh_token")
-        if new_refresh_token and new_refresh_token != self.refresh_token:
-            self.refresh_token = new_refresh_token
-            self._persist_token(self.config.refresh_token_path, new_refresh_token)
-            logger.info("Tesla issued a new refresh token; stored it for future syncs")
+    def refresh_access_token(self) -> None:
+        with self._lock:
+            if not self.refresh_token:
+                raise TeslaAuthError(
+                    "Cannot renew the Tesla access token because no refresh token is configured"
+                )
+            logger.info("Requesting a new Tesla access token")
+            payload = {
+                "grant_type": "refresh_token",
+                "client_id": "ownerapi",
+                "refresh_token": self.refresh_token,
+                "scope": "openid email offline_access",
+            }
+            try:
+                data = self._auth_post(payload)
+            except curl_requests.exceptions.RequestException as e:
+                raise TeslaAuthError(f"Renewing the Tesla access token failed: {e}") from e
+
+            self.access_token = data["access_token"]
+            self._persist_token(self.config.access_token_path, self.access_token)
+            # Tesla may rotate the refresh token; losing the new one would
+            # permanently break auth once the old one is invalidated.
+            new_refresh_token = data.get("refresh_token")
+            if new_refresh_token and new_refresh_token != self.refresh_token:
+                self.refresh_token = new_refresh_token
+                self._persist_token(self.config.refresh_token_path, new_refresh_token)
+                logger.info("Tesla issued a new refresh token; stored it for future syncs")
         logger.info("Tesla access token renewed")
 
 
@@ -546,7 +593,9 @@ class TeslaAPIClient:
             if response.get("errors"):
                 raise TeslaAPIError(f"Charging history GraphQL error: {response['errors']}")
 
-            history = (((response.get("data") or {}).get("me") or {}).get("charging") or {}).get("historyV2") or {}
+            history = dig(response, "data", "me", "charging", "historyV2")
+            if not isinstance(history, dict):
+                history = {}
             page_data = history.get("data") or []
             sessions.extend(page_data)
             logger.debug(

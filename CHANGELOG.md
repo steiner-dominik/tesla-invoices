@@ -1,4 +1,48 @@
 <!-- https://developers.home-assistant.io/docs/apps/presentation#keeping-a-changelog -->
+## 2026.07.08
+
+- **Easier Tesla login**: the *Connect Tesla account* dialog now walks you
+  through the sign-in with clear numbered steps, including a hint for desktop
+  browsers where the `tesla://auth/callback` address never reaches the address
+  bar (find it via right-click → *Inspect* → *Console*/*Network*). New
+  fallback: **paste a refresh token directly** (e.g. from
+  [tesla_auth](https://github.com/adriankumpf/tesla_auth) or the iOS
+  [Auth app for Tesla](https://apps.apple.com/us/app/auth-app-for-tesla/id1552058613))
+  — the token is verified with Tesla before it is stored, so a bad paste never
+  replaces a working credential. New endpoint: `POST /api/auth/token`.
+- **Charging invoices can now be disabled** (`ENABLE_CHARGING_INVOICE=False` /
+  HA option `enable_charging_invoice`) for users who only want subscription
+  invoices — the mirror of the existing subscription switch. Enable none, one,
+  or both: with **both disabled, downloads are paused** — syncs only verify
+  the Tesla connection (keeping the token fresh), and the dashboard shows a
+  banner that nothing will be downloaded.
+- **Translations are now easy to contribute**: the dashboard texts moved out
+  of the code into plain JSON files (`app/static/i18n/<code>.json` plus a
+  `languages.json` manifest). Adding a language needs no code changes — see
+  the README ("Contributing a translation"). The language toggle is built
+  from the manifest automatically.
+- **Correct month assignment across timezone boundaries**: charging sessions
+  are now bucketed (and their files named) by the *local* date instead of
+  UTC — an invoice from 23:30 UTC on June 30 is a July invoice in Vienna.
+  Previously such invoices could be missed by the current/previous-month
+  sync window or grouped into the wrong month.
+- **Email export robustness**: one unreadable PDF no longer aborts the export
+  loop and silently skips the remaining invoices; concurrent send paths
+  (auto-export, manual send, combined backlog) are serialized so an invoice
+  can never be emailed twice by two overlapping operations.
+- **Fixed a race between login and a running sync**: token refreshes and
+  interactive logins are now serialized, so a sync can no longer read a
+  half-rotated token pair.
+- **Invoices readable on shared volumes**: downloaded PDFs and metadata files
+  are now written with `0644` permissions instead of `0600`, so they are
+  readable by other users/apps when the invoice directory is shared (e.g. an
+  SMB mount). Token files stay `0600`.
+- **Hardened against unexpected Tesla API responses**: a non-object value in
+  the charging-history GraphQL response (e.g. `"me": "Not Found"`) no longer
+  crashes the sync.
+- The dashboard was split into separate HTML/CSS/JS files (served under
+  `static/`); no functional change beyond the above.
+
 ## 2026.07.07
 
 Two fixes for the in-app Tesla login introduced in 2026.07.06:

@@ -98,7 +98,8 @@ sign in from the dashboard.
 | `ACCESS_TOKEN` | – | Optional; obtained automatically from the refresh token if omitted (see note below) |
 | `TZ` | UTC | Time zone for timestamps and month boundaries, e.g. `Europe/Vienna` |
 | `POLLING_INTERVAL` | `15` | Minutes between checks for new invoices |
-| `ENABLE_SUBSCRIPTION_INVOICE` | `True` | Also download subscription (e.g. Premium Connectivity) invoices |
+| `ENABLE_CHARGING_INVOICE` | `True` | Download charging (Supercharging) invoices; disable to only fetch subscription invoices |
+| `ENABLE_SUBSCRIPTION_INVOICE` | `True` | Also download subscription (e.g. Premium Connectivity) invoices. Disabling **both** types is allowed and pauses all downloads — syncs then only verify the Tesla connection, and the dashboard shows a banner |
 | `DEFAULT_CURRENCY` | auto | Preferred dashboard currency (e.g. `EUR`); auto-detected when empty |
 | `LANGUAGE` | browser | Default dashboard language (`en`, `de`); the EN/DE toggle in the dashboard overrides it per user |
 | `ENABLE_EMAIL_EXPORT` | `False` | Email every new invoice, exactly once |
@@ -173,7 +174,25 @@ uv lock && uv export --no-dev --no-hashes --no-emit-project --output-file requir
 The layout is deliberately small: [app/api.py](app/api.py) (Tesla API client + auth),
 [app/downloader.py](app/downloader.py) (invoice download + PDF cost extraction),
 [app/server.py](app/server.py) (FastAPI backend), [app/emailer.py](app/emailer.py)
-(SMTP export), [app/static/index.html](app/static/index.html) (dependency-free dashboard).
+(SMTP export), and the dependency-free dashboard in [app/static/](app/static/)
+([index.html](app/static/index.html) markup, [css/style.css](app/static/css/style.css),
+[js/app.js](app/static/js/app.js) logic, [js/i18n.js](app/static/js/i18n.js) +
+[i18n/](app/static/i18n/) translations).
+
+### 🌍 Contributing a translation
+
+The dashboard languages live in [app/static/i18n/](app/static/i18n/) — one flat
+JSON file per language, no code changes needed:
+
+1. Copy [`en.json`](app/static/i18n/en.json) to `<code>.json` (two-letter
+   ISO 639-1 code, e.g. `fr.json`) and translate the values. Keep the keys and
+   the `{placeholders}` exactly as they are; a missing key silently falls back
+   to English.
+2. Add the language to [`languages.json`](app/static/i18n/languages.json)
+   (`"fr": "Français"`) — that adds the button to the dashboard's language
+   toggle.
+3. Open a pull request. You can test locally by starting the app and switching
+   the language in the top-right corner.
 
 ## ❤️ Support the project
 

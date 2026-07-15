@@ -13,6 +13,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
@@ -136,6 +137,11 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Tesla Invoices", lifespan=lifespan)
+
+# Stylesheet, scripts and the translation files (static/i18n/*.json). The
+# dashboard references them with RELATIVE paths so they stay inside the Home
+# Assistant ingress prefix.
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # The exact value is irrelevant — HTML forms cannot set custom headers, and a
 # cross-origin script could only add one after a CORS preflight, which this
@@ -270,6 +276,10 @@ def _collect_analytics() -> dict[str, Any]:
         # Whether a Tesla token is configured; the UI shows the login flow
         # (and a setup banner) when this is false.
         "token_configured": downloader.client.token_manager.has_token(),
+        # With both switched off the UI shows a "connection check only,
+        # nothing will be downloaded" banner.
+        "charging_invoice_enabled": config.enable_charging_invoice,
+        "subscription_invoice_enabled": config.enable_subscription_invoice,
     }
 
     return {"summary": summary, "data": data, "sync": _sync_state}
@@ -439,6 +449,34 @@ async def auth_login_complete(payload: CallbackRequest) -> dict[str, str]:
 
     # Fetch the current and previous month immediately (unless a sync is
     # already running), so the dashboard is not empty after connecting.
+    if not _sync_lock.locked():
+        _manual_sync_task = asyncio.create_task(_run_sync(_current_and_previous_month(), kind="after login"))
+    return {"status": "connected"}
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
+@app.post("/api/auth/token")
+async def auth_set_refresh_token(payload: RefreshTokenRequest) -> dict[str, str]:
+    """Fallback for when the browser login flow is not workable: accept a
+    refresh token generated with a third-party tool (e.g. tesla_auth). The
+    token is verified against Tesla before it is stored — a bad paste never
+    replaces a working credential."""
+    global _manual_sync_task
+    token = payload.refresh_token.strip()
+    if not token:
+        raise HTTPException(status_code=422, detail="No refresh token provided")
+
+    token_manager = downloader.client.token_manager
+    try:
+        await asyncio.to_thread(token_manager.set_refresh_token, token)
+    except TeslaAuthError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+
+    # Same as after a browser login: fetch the current and previous month
+    # right away so the dashboard is not empty after connecting.
     if not _sync_lock.locked():
         _manual_sync_task = asyncio.create_task(_run_sync(_current_and_previous_month(), kind="after login"))
     return {"status": "connected"}

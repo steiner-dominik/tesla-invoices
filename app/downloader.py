@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from app import storage
+from app import api, storage
 from app.api import TeslaAPIClient
 from app.config import Config
 
@@ -58,6 +58,16 @@ class InvoiceDownloader:
         return (item_datetime.year, item_datetime.month) in months
 
     @staticmethod
+    def _as_local(dt: datetime) -> datetime:
+        """Timezone-aware timestamps (charging sessions come back in UTC) are
+        converted to the process time zone, so month bucketing and file names
+        follow the user's calendar — a session at 23:30 UTC on June 30 is a
+        July invoice in Vienna, and the month window is built from local
+        dates too. Naive values (date-only subscription invoices) already
+        are calendar dates and stay untouched."""
+        return dt.astimezone() if dt.tzinfo is not None else dt
+
+    @staticmethod
     def _write_metadata(path: Path, metadata: dict) -> None:
         """Merge metadata into an existing sidecar file instead of overwriting.
 
@@ -73,6 +83,14 @@ class InvoiceDownloader:
             "all months" if month_set is None else ", ".join(sorted(f"{y}-{m:02d}" for y, m in month_set))
         )
         logger.info(f"Starting invoice sync ({date_str})")
+        if not self.config.enable_charging_invoice and not self.config.enable_subscription_invoice:
+            # Legitimate configuration (downloads paused): the sync degrades
+            # to a connection check — the vehicle fetch below still validates
+            # the token and keeps it rotated.
+            logger.info(
+                "Charging and subscription invoice downloads are both disabled — "
+                "only checking the Tesla connection, nothing will be downloaded"
+            )
 
         self.config.invoice_path.mkdir(parents=True, exist_ok=True)
         vehicles = self.client.get_vehicles()
@@ -83,11 +101,12 @@ class InvoiceDownloader:
             # Logs may be pasted into public bug reports; never log the full
             # VIN (or other personal data) at normal log levels.
             label = display_name or f"VIN ending in {vin[-4:]}"
-            logger.info(f"Checking vehicle '{label}' for new charging invoices")
 
-            charging_data = self.client.get_charging_history(vin)
-            charging_sessions = self._extract_charging_sessions(charging_data)
-            failures += self._save_charging_invoices(charging_sessions, month_set, vin, display_name)
+            if self.config.enable_charging_invoice:
+                logger.info(f"Checking vehicle '{label}' for new charging invoices")
+                charging_data = self.client.get_charging_history(vin)
+                charging_sessions = self._extract_charging_sessions(charging_data)
+                failures += self._save_charging_invoices(charging_sessions, month_set, vin, display_name)
 
             if self.config.enable_subscription_invoice:
                 logger.info(f"Checking vehicle '{label}' for new subscription invoices")
@@ -117,8 +136,8 @@ class InvoiceDownloader:
             return data_payload
         if isinstance(data_payload, dict):
             # GraphQL response: data.me.charging.historyV2.data
-            history_v2 = (((data_payload.get("me") or {}).get("charging") or {}).get("historyV2") or {})
-            if isinstance(history_v2.get("data"), list):
+            history_v2 = api.dig(data_payload, "me", "charging", "historyV2")
+            if isinstance(history_v2, dict) and isinstance(history_v2.get("data"), list):
                 return history_v2["data"]
 
         return []
@@ -149,7 +168,7 @@ class InvoiceDownloader:
                 if not session_date:
                     logger.warning(f"Charging session without any date, skipping: {session.get('chargeSessionId')}")
                     continue
-                session_dt = datetime.fromisoformat(session_date)
+                session_dt = self._as_local(datetime.fromisoformat(session_date))
                 if not self._is_desired_date(session_dt, months):
                     continue
                 invoices = session.get("invoices") or []
@@ -363,7 +382,7 @@ class InvoiceDownloader:
         vin: str,
         vehicle_name: str,
     ) -> None:
-        invoice_dt = datetime.fromisoformat(invoice["InvoiceDate"])
+        invoice_dt = self._as_local(datetime.fromisoformat(invoice["InvoiceDate"]))
         if not self._is_desired_date(invoice_dt, months):
             return
 

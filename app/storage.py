@@ -47,6 +47,12 @@ def write_bytes_atomic(path: Path, content: bytes) -> None:
     try:
         with os.fdopen(fd, "wb") as tmp:
             tmp.write(content)
+            # mkstemp creates the file 0600; the rename keeps that, which
+            # makes invoices unreadable for other users/apps when the
+            # directory is shared (e.g. an SMB mount off Home Assistant).
+            # These are invoices and their metadata, not secrets — token
+            # files are written elsewhere and stay 0600.
+            os.fchmod(tmp.fileno(), 0o644)
         os.replace(tmp_name, path)
     except BaseException:
         with suppress(OSError):

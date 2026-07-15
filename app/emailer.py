@@ -1,6 +1,7 @@
 import logging
 import smtplib
 import ssl
+import threading
 import time
 from datetime import datetime
 from email.message import EmailMessage
@@ -27,6 +28,12 @@ MAX_ATTACHMENTS_PER_MAIL = 20
 MAX_BYTES_PER_MAIL = 15 * 1024 * 1024
 
 FOOTER = "This message was sent automatically by Tesla Invoices."
+
+# Serializes every send path (auto-export after a sync, manual single send,
+# combined backlog send): they all run in worker threads and share the
+# "check email_sent flag → send → set email_sent flag" cycle, so two of them
+# processing the same invoice concurrently would email it twice.
+_SEND_LOCK = threading.Lock()
 
 
 class EmailExporter:
@@ -281,29 +288,30 @@ class EmailExporter:
                 logger.info(f"Email sending skipped for this sync: marked {marked} invoice(s) as skipped")
             return
 
-        pending = self._pending_invoices()
-        if not pending:
-            logger.debug("Email export: nothing to send")
-            return
+        with _SEND_LOCK:
+            pending = self._pending_invoices()
+            if not pending:
+                logger.debug("Email export: nothing to send")
+                return
 
-        logger.info(f"Email export: sending {len(pending)} new invoice(s)")
-        try:
-            with self._connect() as smtp:
-                for pdf in pending:
-                    try:
-                        self._send_one(smtp, pdf)
-                    except smtplib.SMTPException as e:
-                        logger.error(f"Failed to send mail for {pdf.name}: {e}")
-        except (smtplib.SMTPException, OSError) as e:
-            # Not necessarily a connect failure: an OSError can also come
-            # from reading a PDF mid-send.
-            logger.error(f"Email export via {self.config.email_server} failed: {e}")
+            logger.info(f"Email export: sending {len(pending)} new invoice(s)")
+            try:
+                with self._connect() as smtp:
+                    for pdf in pending:
+                        try:
+                            self._send_one(smtp, pdf)
+                        except (smtplib.SMTPException, OSError) as e:
+                            # OSError too: one unreadable PDF must not abort
+                            # the loop and silently skip everything after it.
+                            logger.error(f"Failed to send mail for {pdf.name}: {e}")
+            except (smtplib.SMTPException, OSError) as e:
+                logger.error(f"Email export via {self.config.email_server} failed: {e}")
 
     def send_single(self, pdf: Path, to: str | None = None) -> None:
         """Send one invoice on demand, optionally to a custom recipient.
         Unlike ``send_pending``, errors propagate to the caller so the UI
         can show them."""
-        with self._connect() as smtp:
+        with _SEND_LOCK, self._connect() as smtp:
             self._send_one(smtp, pdf, to=to)
 
     def send_skipped(self, to: str | None = None) -> dict:
@@ -311,44 +319,45 @@ class EmailExporter:
         the size limits allow. Errors propagate to the caller (UI-triggered).
         Returns ``{"sent": <invoices>, "emails": <messages>}``."""
         recipient = (to or self.config.email_to).strip()
-        skipped = self._skipped_invoices()
-        if not skipped:
-            return {"sent": 0, "emails": 0}
+        with _SEND_LOCK:
+            skipped = self._skipped_invoices()
+            if not skipped:
+                return {"sent": 0, "emails": 0}
 
-        batches: list[list[Path]] = []
-        batch: list[Path] = []
-        batch_bytes = 0
-        for pdf in skipped:
-            size = pdf.stat().st_size
-            if batch and (len(batch) >= MAX_ATTACHMENTS_PER_MAIL or batch_bytes + size > MAX_BYTES_PER_MAIL):
-                batches.append(batch)
-                batch, batch_bytes = [], 0
-            batch.append(pdf)
-            batch_bytes += size
-        batches.append(batch)
+            batches: list[list[Path]] = []
+            batch: list[Path] = []
+            batch_bytes = 0
+            for pdf in skipped:
+                size = pdf.stat().st_size
+                if batch and (len(batch) >= MAX_ATTACHMENTS_PER_MAIL or batch_bytes + size > MAX_BYTES_PER_MAIL):
+                    batches.append(batch)
+                    batch, batch_bytes = [], 0
+                batch.append(pdf)
+                batch_bytes += size
+            batches.append(batch)
 
-        sent = 0
-        with self._connect() as smtp:
-            for index, batch in enumerate(batches, start=1):
-                email = EmailMessage()
-                email["From"] = self.config.email_from
-                email["To"] = recipient
-                part = f", part {index} of {len(batches)}" if len(batches) > 1 else ""
-                email["Subject"] = f"Tesla invoices - combined export of {len(batch)} invoice(s){part}"
-                email.set_content(self._combined_body(batch, index, len(batches)))
-                for pdf in batch:
-                    email.add_attachment(
-                        pdf.read_bytes(),
-                        maintype="application",
-                        subtype="pdf",
-                        filename=pdf.name,
-                    )
-                smtp.send_message(email)
+            sent = 0
+            with self._connect() as smtp:
+                for index, batch in enumerate(batches, start=1):
+                    email = EmailMessage()
+                    email["From"] = self.config.email_from
+                    email["To"] = recipient
+                    part = f", part {index} of {len(batches)}" if len(batches) > 1 else ""
+                    email["Subject"] = f"Tesla invoices - combined export of {len(batch)} invoice(s){part}"
+                    email.set_content(self._combined_body(batch, index, len(batches)))
+                    for pdf in batch:
+                        email.add_attachment(
+                            pdf.read_bytes(),
+                            maintype="application",
+                            subtype="pdf",
+                            filename=pdf.name,
+                        )
+                    smtp.send_message(email)
 
-                now = int(time.time())
-                for pdf in batch:
-                    storage.update_json(pdf.with_suffix(".json"), {"email_sent": now}, remove=("email_skipped",))
-                sent += len(batch)
-                logger.info(f"Sent combined export email {index}/{len(batches)} with {len(batch)} invoice(s)")
+                    now = int(time.time())
+                    for pdf in batch:
+                        storage.update_json(pdf.with_suffix(".json"), {"email_sent": now}, remove=("email_skipped",))
+                    sent += len(batch)
+                    logger.info(f"Sent combined export email {index}/{len(batches)} with {len(batch)} invoice(s)")
 
-        return {"sent": sent, "emails": len(batches)}
+            return {"sent": sent, "emails": len(batches)}

@@ -505,3 +505,60 @@ def test_rescan_negates_credit_notes(client, monkeypatch):
 
     assert response.status_code == 200
     assert jsonlib.loads(metadata_path.read_text())["total_cost"] == -9.99
+
+
+def test_auth_token_stores_refresh_token_and_reports_connected(client, monkeypatch):
+    stored = []
+    monkeypatch.setattr(
+        server.downloader.client.token_manager,
+        "set_refresh_token",
+        lambda token: stored.append(token),
+    )
+
+    async def fake_run_sync(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr(server, "_run_sync", fake_run_sync)
+
+    response = client.post("/api/auth/token", json={"refresh_token": "  eyJx.token  "})
+    assert response.status_code == 200
+    assert response.json() == {"status": "connected"}
+    assert stored == ["eyJx.token"]  # whitespace from copy-paste stripped
+
+
+def test_auth_token_rejects_empty(client, monkeypatch):
+    monkeypatch.setattr(
+        server.downloader.client.token_manager,
+        "set_refresh_token",
+        lambda token: (_ for _ in ()).throw(AssertionError("must not be called for empty input")),
+    )
+    assert client.post("/api/auth/token", json={"refresh_token": "   "}).status_code == 422
+
+
+def test_auth_token_invalid_token_is_502(client, monkeypatch):
+    from app.api import TeslaAuthError
+
+    def reject(token):
+        raise TeslaAuthError("Renewing the Tesla access token failed")
+
+    monkeypatch.setattr(server.downloader.client.token_manager, "set_refresh_token", reject)
+    response = client.post("/api/auth/token", json={"refresh_token": "eyJbogus"})
+    assert response.status_code == 502
+
+
+def test_index_and_static_assets_are_served(client):
+    assert client.get("/").status_code == 200
+    for path in (
+        "/static/css/style.css",
+        "/static/js/i18n.js",
+        "/static/js/app.js",
+        "/static/i18n/languages.json",
+        "/static/i18n/en.json",
+    ):
+        assert client.get(path).status_code == 200, path
+
+
+def test_analytics_reports_invoice_type_switches(client):
+    summary = client.get("/api/analytics").json()["summary"]
+    assert summary["charging_invoice_enabled"] is True
+    assert summary["subscription_invoice_enabled"] is True
