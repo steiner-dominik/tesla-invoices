@@ -35,6 +35,43 @@ def read_json(path: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+# Parsed-sidecar cache for the read-heavy dashboard endpoints: every
+# /api/analytics or CSV request re-reads every sidecar, which with years of
+# invoices means thousands of open+parse calls per dashboard refresh. The
+# (mtime_ns, size) check keeps it always-fresh: every write here goes through
+# an atomic rename, which bumps the mtime.
+_CACHE_LOCK = threading.Lock()
+_read_cache: dict[Path, tuple[int, int, dict]] = {}
+
+
+def read_json_cached(path: Path) -> dict:
+    """Like ``read_json``, but served from an in-memory cache while the file
+    on disk is unchanged. Callers must treat the returned dict as read-only —
+    it is shared between requests."""
+    try:
+        stat = path.stat()
+    except OSError:
+        with _CACHE_LOCK:
+            _read_cache.pop(path, None)
+        return {}
+    with _CACHE_LOCK:
+        entry = _read_cache.get(path)
+        if entry is not None and entry[0] == stat.st_mtime_ns and entry[1] == stat.st_size:
+            return entry[2]
+    data = read_json(path)
+    with _CACHE_LOCK:
+        _read_cache[path] = (stat.st_mtime_ns, stat.st_size, data)
+    return data
+
+
+def prune_read_cache(keep: set[Path]) -> None:
+    """Drop cache entries for files that no longer exist (deleted invoices)
+    so the cache cannot grow beyond the invoice directory's contents."""
+    with _CACHE_LOCK:
+        for path in [p for p in _read_cache if p not in keep]:
+            _read_cache.pop(path, None)
+
+
 def write_bytes_atomic(path: Path, content: bytes) -> None:
     """Write via a temp file + rename, so readers never see a partial file.
 

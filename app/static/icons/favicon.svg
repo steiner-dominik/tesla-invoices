@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <style>
+    :root { --tile_top: #3a3d44;--tile_bottom: #141619;--tile_stroke: rgba(255,255,255,0.10);--doc_fill: rgba(255,255,255,0.13);--doc_stroke: rgba(255,255,255,0.32);--fold_fill: rgba(255,255,255,0.30);--line: rgba(255,255,255,0.40); }
+    @media (prefers-color-scheme: light) { :root { --tile_top: #ffffff;--tile_bottom: #d7dbe1;--tile_stroke: rgba(0,0,0,0.12);--doc_fill: rgba(255,255,255,0.85);--doc_stroke: rgba(0,0,0,0.22);--fold_fill: rgba(0,0,0,0.10);--line: rgba(0,0,0,0.30); } }
+  </style>
+  
+  <defs>
+    <radialGradient id="tile" cx="0.5" cy="0.18" r="1.1">
+      <stop offset="0" stop-color="var(--tile_top)"/>
+      <stop offset="1" stop-color="var(--tile_bottom)"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ff2d33" stop-opacity="0.38"/>
+      <stop offset="1" stop-color="#ff2d33" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="bolt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff2d33"/>
+      <stop offset="1" stop-color="#e31b23"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="496" height="496" rx="112" fill="url(#tile)" stroke="var(--tile_stroke)" stroke-width="4"/>
+  <g>
+    <!-- glass invoice sheet with a folded corner and text lines -->
+    <path d="M150 138 a14 14 0 0 1 14 -14 h150 l58 58 v226 a14 14 0 0 1 -14 14 h-194 a14 14 0 0 1 -14 -14 z"
+          fill="var(--doc_fill)" stroke="var(--doc_stroke)" stroke-width="5"/>
+    <path d="M314 124 l58 58 h-44 a14 14 0 0 1 -14 -14 z" fill="var(--fold_fill)"/>
+    <g fill="var(--line)">
+      <rect x="176" y="160" width="96" height="13" rx="6.5"/>
+      <rect x="176" y="190" width="120" height="13" rx="6.5"/>
+      <rect x="176" y="288" width="60" height="13" rx="6.5"/>
+      <rect x="286" y="288" width="50" height="13" rx="6.5"/>
+      <rect x="176" y="318" width="72" height="13" rx="6.5"/>
+      <rect x="286" y="318" width="50" height="13" rx="6.5"/>
+      <rect x="176" y="348" width="52" height="13" rx="6.5"/>
+      <rect x="286" y="348" width="50" height="13" rx="6.5"/>
+    </g>
+    <!-- soft red glow behind the emblem -->
+    <ellipse cx="256" cy="266" rx="150" ry="150" fill="url(#glow)"/>
+    <!-- the T-bolt: Tesla-style swept crossbar, lightning-bolt stem -->
+    <g fill="url(#bolt)">
+      <path d="M104 178 C 170 138 342 138 408 178 L 374 232 C 322 200 190 200 138 232 Z"/>
+      <path d="M276 196 L 202 340 L 248 340 L 190 448 L 326 296 L 276 296 L 338 196 Z"/>
+    </g>
+  </g>
+
+</svg>

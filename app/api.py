@@ -271,6 +271,13 @@ class TokenManager:
 
         return best_token
 
+    def current_access_token(self) -> str:
+        """The access token, read under the lock — callers building request
+        headers must use this instead of reading ``access_token`` directly,
+        so they can never observe a half-rotated token pair mid-refresh."""
+        with self._lock:
+            return self.access_token
+
     def has_token(self) -> bool:
         """Read-only check for whether any usable token is configured, for the
         UI's setup state. Unlike load_tokens() it never raises or persists."""
@@ -478,7 +485,7 @@ class TeslaAPIClient:
         for attempt in range(MAX_RETRIES):
             # Rebuilt every attempt: a forced refresh below replaces the token.
             headers = {
-                "Authorization": f"Bearer {self.token_manager.access_token}",
+                "Authorization": f"Bearer {self.token_manager.current_access_token()}",
                 **(extra_headers or {}),
             }
             try:

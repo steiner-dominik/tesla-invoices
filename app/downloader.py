@@ -8,6 +8,7 @@ from typing import Any
 from app import api, storage
 from app.api import TeslaAPIClient
 from app.config import Config
+from app.privacy import redact_vin
 
 logger = logging.getLogger(__name__)
 
@@ -222,7 +223,7 @@ class InvoiceDownloader:
         logger.info(f"Downloading new charging invoice {filename}")
         content = self.client.get_charging_invoice(invoice_id, vin)
         storage.write_bytes_atomic(local_pdf_path, content)
-        logger.debug(f"Saved '{local_pdf_path}'")
+        logger.debug(f"Saved '{redact_vin(local_pdf_path)}'")
 
     @staticmethod
     def _charging_fee_metadata(session: dict) -> dict:
@@ -409,10 +410,10 @@ class InvoiceDownloader:
             logger.info(f"Downloading new subscription invoice {invoice['InvoiceFileName']}")
             content = self.client.get_subscription_invoice(invoice["InvoiceId"], vin)
             storage.write_bytes_atomic(local_pdf_path, content)
-            logger.debug(f"Saved '{local_pdf_path}'")
+            logger.debug(f"Saved '{redact_vin(local_pdf_path)}'")
 
         if not have_cost and local_pdf_path.exists():
-            logger.debug(f"Parsing PDF {local_pdf_path.name} to extract cost")
+            logger.debug(f"Parsing PDF {redact_vin(local_pdf_path.name)} to extract cost")
             total_cost, currency = self.extract_cost_from_pdf(local_pdf_path.read_bytes())
             if is_credit_note:
                 # Some credit-note layouts print the refunded amount as

@@ -1,4 +1,50 @@
 <!-- https://developers.home-assistant.io/docs/apps/presentation#keeping-a-changelog -->
+## 2026.07.19.1
+
+- **New versioning scheme**: releases are now fully date-based —
+  `YYYY.MM.DD.N` (this release: `2026.07.19.1`), where `N` counts releases
+  published on the same day. The old `YYYY.MM.patch` tags stay valid.
+- **Installable as an app (PWA)**: open the dashboard in a browser and use
+  *Install app* (Chrome/Edge) or *Add to Home Screen* (iOS/Android) to get a
+  standalone app window with its own icon. Nothing is cached offline — the
+  dashboard always shows live data.
+- **New app icon**, redrawn as vector art in the familiar style: the favicon
+  now switches automatically between a light and a dark tile with the OS
+  theme, and the same artwork is used for the PWA, the Home Assistant app
+  store, and Apple touch icons
+  (regenerate anytime with `scripts/make_icons.py`).
+- **README refresh**: build/release/license badges and dashboard screenshots
+  (mock data only) that follow GitHub's light/dark theme.
+- **SBOM with every release**: each GitHub release now carries a CycloneDX
+  `sbom.cdx.json` asset, and the Docker images embed an SBOM attestation and
+  build provenance. The README's new *Dependencies, SBOM & continuity*
+  section documents how to update dependencies and keep the project alive
+  should it ever become unmaintained.
+
+Fixes from an external security & architecture audit:
+
+- **Privacy: the full VIN no longer leaks into logs.** Local file names
+  embed the VIN, and several log lines printed those names verbatim —
+  undoing the deliberate "VIN ending in XXXX" log policy. All such log
+  lines now redact the VIN down to its last four characters.
+- **Hardened the container entrypoint**: volume ownership is now fixed
+  without ever following symlinks, so a malicious link planted inside a
+  mounted volume can no longer redirect the ownership change to a host file.
+- ⚠️ **`GET /api/export.csv` and `GET /api/export.zip` now require the
+  `X-Requested-With` header** (any value), like every mutating request.
+  This stops malicious websites from hot-linking these expensive endpoints
+  cross-origin to burn CPU and disk I/O. Scripts calling them must add the
+  header; the dashboard buttons were adapted.
+- **Faster dashboard with a large history**: invoice metadata is now served
+  from an always-fresh in-memory cache (invalidated by file modification
+  time), so `/api/analytics` and the CSV export no longer re-read and
+  re-parse every sidecar file on each request — easier on SD cards, too.
+- **`/health` stays responsive during a PDF re-scan** (the extraction loop
+  now yields between files), so the HA watchdog cannot misfire during a
+  long re-scan.
+- **Token reads are now lock-protected**, closing a theoretical race where
+  a request could observe a half-rotated access/refresh token pair.
+
 ## 2026.07.08
 
 - **Easier Tesla login**: the *Connect Tesla account* dialog now walks you

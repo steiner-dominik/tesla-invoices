@@ -103,6 +103,7 @@
     "dlg_delete_pdf": "„{file}“ löschen?\n\nDer Metadaten-Eintrag wird mit gelöscht; das PDF wird beim nächsten Sync erneut heruntergeladen, solange die Rechnung bei Tesla existiert.",
     "dlg_delete_json": "„{file}“ löschen?\n\nDies ist eine Metadaten-Datei: Ohne sie wirkt die Rechnung wie neu — bei aktiviertem E-Mail-Export wird sie ggf. ein zweites Mal versendet.",
     "delete_failed": "Löschen fehlgeschlagen: {error}",
+    "export_failed": "Export fehlgeschlagen: {error}",
     "pdf_close": "Schließen",
     "footer_disclaimer": "Nicht mit Tesla, Inc. verbunden.",
     "setup_banner_text": "Willkommen! Verbinde dein Tesla-Konto, um deine Rechnungen herunterzuladen — ganz ohne Konfiguration.",

@@ -15,6 +15,18 @@
     <!-- Relative paths (no leading "/") keep everything inside the Home
          Assistant ingress path prefix. -->
     <link rel="stylesheet" href="static/css/style.css">
+    <!-- The SVG favicon follows the OS light/dark theme; the PNG is the
+         fallback for browsers without SVG favicon support (e.g. Safari). -->
+    <link rel="icon" href="static/icons/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="static/icons/icon-192.png" type="image/png" sizes="192x192">
+    <link rel="apple-touch-icon" href="static/icons/apple-touch-icon.png">
+    <!-- Installable as a PWA (standalone window); manifest.webmanifest is
+         served from the app root so its scope covers the whole app. -->
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#111318" media="(prefers-color-scheme: dark)">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Tesla Invoices">
 </head>
 <body>
     <header>
@@ -61,8 +73,11 @@
                     <option value="subscription" data-i18n="type_subscription">Subscription</option>
                 </select>
                 <span class="spacer"></span>
-                <a class="btn" href="api/export.csv" download data-i18n="export_csv">Export CSV</a>
-                <a class="btn" href="api/export.zip" download data-i18n="download_zip">Download all (ZIP)</a>
+                <!-- Buttons (not plain links): the export endpoints require the
+                     X-Requested-With header, so hot-linking them cross-site for
+                     resource exhaustion is blocked. -->
+                <button class="btn" id="export-csv-btn" type="button" data-i18n="export_csv">Export CSV</button>
+                <button class="btn" id="export-zip-btn" type="button" data-i18n="download_zip">Download all (ZIP)</button>
             </div>
 
             <div class="cards">

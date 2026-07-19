@@ -1,7 +1,6 @@
 import asyncio
 import base64
 import binascii
-import json
 import logging
 import os
 import random
@@ -22,6 +21,7 @@ from app.api import TeslaAPIClient, TeslaAuthError, TokenManager
 from app.config import Config
 from app.downloader import METADATA_VERSION, InvoiceDownloader
 from app.emailer import EmailExporter
+from app.privacy import redact_vin
 
 
 def _safe_file_entry(path: Path) -> dict[str, Any]:
@@ -148,13 +148,20 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 # app never answers. Its mere presence therefore proves a same-origin caller.
 CSRF_HEADER = "x-requested-with"
 
+# Expensive GET endpoints (full directory scan / ZIP assembly) also require
+# the header: otherwise any website could hot-link them cross-origin (e.g.
+# an <img> tag) and burn CPU and disk I/O on repeat — a denial of service,
+# even though the response itself never leaks cross-origin.
+CSRF_GET_PATHS = ("/api/export.csv", "/api/export.zip")
+
 
 @app.middleware("http")
 async def enforce_csrf_header(request: Request, call_next):
     """Reject cross-site mutations: without this, any website open in a
     browser on the same network could trigger syncs, delete files, or mail
     the stored invoices to an arbitrary address via a simple form POST."""
-    if request.method not in ("GET", "HEAD", "OPTIONS") and CSRF_HEADER not in request.headers:
+    needs_header = request.method not in ("GET", "HEAD", "OPTIONS") or request.url.path in CSRF_GET_PATHS
+    if needs_header and CSRF_HEADER not in request.headers:
         return JSONResponse(
             status_code=403,
             content={"detail": "Missing X-Requested-With header — cross-site requests are rejected"},
@@ -194,6 +201,27 @@ async def index():
     return FileResponse(STATIC_DIR / "index.html")
 
 
+# Served from the app ROOT (not /static/): the web-app manifest's scope
+# defaults to its own directory, and the same applies to the service
+# worker — both must cover "." for the PWA install to span the whole app
+# (including under the Home Assistant ingress prefix).
+@app.get("/manifest.webmanifest")
+async def webmanifest():
+    return FileResponse(STATIC_DIR / "manifest.webmanifest", media_type="application/manifest+json")
+
+
+@app.get("/sw.js")
+async def service_worker():
+    return FileResponse(STATIC_DIR / "js" / "sw.js", media_type="text/javascript")
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    # Browsers request /favicon.ico when no page is loaded (e.g. direct PDF
+    # views); serve the PNG icon instead of a 404.
+    return FileResponse(STATIC_DIR / "icons" / "icon-192.png", media_type="image/png")
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     # The Supervisor watchdog polls this endpoint: report unhealthy when the
@@ -222,30 +250,36 @@ def _collect_analytics() -> dict[str, Any]:
     vehicles = set()
     email_skipped_count = 0
 
+    seen: set[Path] = set()
     for json_file in config.invoice_path.glob("*.json"):
         if json_file.name.startswith("."):
             continue  # internal state files (e.g. the email export state)
+        seen.add(json_file)
         try:
-            with open(json_file) as f:
-                meta = json.load(f)
-                data.append(meta)
-                cost = float(meta.get("total_cost", 0) or 0)
-                if cost:
-                    currency = meta.get("currency") or ""
-                    cost_by_currency[currency] = cost_by_currency.get(currency, 0.0) + cost
-                if meta.get("type") == "charging":
-                    total_kwh += float(meta.get("energy_kwh", 0) or 0)
-                vehicles.add(meta.get("vehicle_name") or meta.get("vin"))
-                # Only count sidecars whose PDF still exists — the combined
-                # export sends PDFs, so orphans would inflate the button count
-                if (
-                    "email_skipped" in meta
-                    and "email_sent" not in meta
-                    and json_file.with_suffix(".pdf").exists()
-                ):
-                    email_skipped_count += 1
+            # Cached read: unchanged sidecars cost one stat() instead of an
+            # open+parse, which matters once years of invoices accumulate.
+            meta = storage.read_json_cached(json_file)
+            if not meta:
+                continue  # unreadable/corrupt sidecar (already logged)
+            data.append(meta)
+            cost = float(meta.get("total_cost", 0) or 0)
+            if cost:
+                currency = meta.get("currency") or ""
+                cost_by_currency[currency] = cost_by_currency.get(currency, 0.0) + cost
+            if meta.get("type") == "charging":
+                total_kwh += float(meta.get("energy_kwh", 0) or 0)
+            vehicles.add(meta.get("vehicle_name") or meta.get("vin"))
+            # Only count sidecars whose PDF still exists — the combined
+            # export sends PDFs, so orphans would inflate the button count
+            if (
+                "email_skipped" in meta
+                and "email_sent" not in meta
+                and json_file.with_suffix(".pdf").exists()
+            ):
+                email_skipped_count += 1
         except Exception as e:
-            logger.error(f"Failed to read {json_file}: {e}")
+            logger.error(f"Failed to read {redact_vin(json_file.name)}: {e}")
+    storage.prune_read_cache(seen)
 
     data.sort(key=lambda x: x.get("date", ""), reverse=True)
 
@@ -294,10 +328,7 @@ def _invoice_date(path: Path) -> str:
     """Invoice date from the metadata sidecar (the PDF's mtime is just the
     download time, which says nothing about when the invoice is from)."""
     sidecar = path if path.suffix == ".json" else path.with_suffix(".json")
-    try:
-        return str(json.loads(sidecar.read_text()).get("date") or "")
-    except (OSError, ValueError):
-        return ""
+    return str(storage.read_json_cached(sidecar).get("date") or "")
 
 
 def _scan_files() -> dict[str, Any]:
@@ -337,9 +368,16 @@ async def rescan_pdfs() -> dict[str, Any]:
 
 
 def _rescan_pdfs() -> dict[str, Any]:
+    import time
+
     updated = 0
     skipped = 0
     for pdf_path in sorted(config.invoice_path.glob("*.pdf")):
+        # PDF text extraction is pure Python and holds the GIL for most of
+        # each file; this brief sleep hands the interpreter back to the event
+        # loop between files so /health (HA watchdog!) stays responsive
+        # during a long rescan.
+        time.sleep(0.01)
         json_path = pdf_path.with_suffix(".json")
         existing = storage.read_json(json_path)
 
@@ -350,11 +388,11 @@ def _rescan_pdfs() -> dict[str, Any]:
         try:
             total_cost, currency = downloader.extract_cost_from_pdf(pdf_path.read_bytes())
         except Exception as exc:
-            logger.warning(f"Failed to rescan {pdf_path.name}: {exc}")
+            logger.warning(f"Failed to rescan {redact_vin(pdf_path.name)}: {exc}")
             continue
 
         if total_cost == 0 and not currency:
-            logger.warning(f"Rescan could not extract a cost from {pdf_path.name}")
+            logger.warning(f"Rescan could not extract a cost from {redact_vin(pdf_path.name)}")
             continue
 
         if existing.get("is_credit_note"):
@@ -519,7 +557,7 @@ async def delete_file(filename: str) -> dict[str, Any]:
         if sidecar.is_file():
             sidecar.unlink()
             sidecar_deleted = True
-    logger.info(f"Deleted {file_path.name} via file browser (sidecar too: {sidecar_deleted})")
+    logger.info(f"Deleted {redact_vin(file_path.name)} via file browser (sidecar too: {sidecar_deleted})")
     return {"status": "deleted", "file": file_path.name, "sidecar_deleted": sidecar_deleted}
 
 
@@ -639,10 +677,12 @@ def _build_csv() -> Response:
         if json_file.name.startswith("."):
             continue  # internal state files (e.g. the email export state)
         try:
-            meta = json.loads(json_file.read_text())
+            meta = storage.read_json_cached(json_file)
+            if not meta:
+                continue  # unreadable/corrupt sidecar (already logged)
             rows.append({field: _csv_safe(meta.get(field, "")) for field in fields})
         except Exception as e:
-            logger.error(f"Failed to read {json_file}: {e}")
+            logger.error(f"Failed to read {redact_vin(json_file.name)}: {e}")
     rows.sort(key=lambda r: r.get("date", ""), reverse=True)
 
     buffer = io.StringIO()

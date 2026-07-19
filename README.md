@@ -1,5 +1,16 @@
 # ⚡ Tesla Invoices
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/icon-dark.png">
+  <img src="docs/icon-light.png" alt="Tesla Invoices icon" width="96" align="right">
+</picture>
+
+[![CI](https://github.com/steiner-dominik/tesla-invoices/actions/workflows/ci.yml/badge.svg)](https://github.com/steiner-dominik/tesla-invoices/actions/workflows/ci.yml)
+[![Docker](https://github.com/steiner-dominik/tesla-invoices/actions/workflows/docker.yml/badge.svg)](https://github.com/steiner-dominik/tesla-invoices/actions/workflows/docker.yml)
+[![Latest release](https://img.shields.io/github/v/release/steiner-dominik/tesla-invoices)](https://github.com/steiner-dominik/tesla-invoices/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Container](https://img.shields.io/badge/ghcr.io-container-blue)](https://github.com/steiner-dominik/tesla-invoices/pkgs/container/tesla-invoices)
+
 [![GitHub Sponsors](https://img.shields.io/badge/GitHub%20Sponsors-%E2%9D%A4-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/steiner-dominik)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-donate-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/dominik_steiner)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/dominik.st)
@@ -17,6 +28,15 @@ optional automatic email forwarding of every new invoice.
 
 Runs anywhere Docker runs — or as a
 [Home Assistant app](https://github.com/steiner-dominik/home-assistant-apps) with one click.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dashboard-dark.png">
+    <img src="docs/screenshot-dashboard-light.png" alt="The analytics dashboard: summary cards, monthly energy and cost charts, and the sortable invoice table (shown with example data)" width="850">
+  </picture>
+  <br>
+  <sub>The dashboard follows your system's light/dark theme — so does this screenshot. All data shown is mock data.</sub>
+</p>
 
 ---
 
@@ -38,6 +58,9 @@ Runs anywhere Docker runs — or as a
 - **Sign in from the dashboard** — no token wrangling: start the app, click
   **Connect Tesla account**, log in on Tesla's own page, and you're done. The
   token is obtained, rotated, and stored automatically with strict file permissions.
+- **Installable as an app (PWA)** — open the dashboard in your browser and use
+  *Install app* (Chrome/Edge) or *Add to Home Screen* (iOS Safari, Android) to
+  get it as a standalone app with its own icon and window, no browser chrome.
 
 ## 🚀 Quick start (Docker)
 
@@ -136,8 +159,8 @@ The dashboard is a thin client over a small REST API you can use directly:
 | -------- | ----------- |
 | `POST /api/sync?month=all\|cur\|prev\|YYYY-MM&skip_email=true` | Trigger a sync for a month range; `skip_email` marks new invoices as skipped instead of emailing each one |
 | `GET /api/analytics` | All invoice metadata + summary + sync status |
-| `GET /api/export.csv` | CSV export of all invoices |
-| `GET /api/export.zip` | All invoice PDFs bundled into one ZIP |
+| `GET /api/export.csv` | CSV export of all invoices (requires the `X-Requested-With` header, see below) |
+| `GET /api/export.zip` | All invoice PDFs bundled into one ZIP (requires the `X-Requested-With` header, see below) |
 | `GET /api/download/{filename}?inline=true` | Download / view an invoice PDF |
 | `POST /api/email/{filename}` | Email one invoice; JSON body `{"to": "…"}` overrides the configured recipient |
 | `POST /api/email/send-skipped` | Email all skipped invoices as a combined, batched export (JSON body `{"to": "…"}` optional) |
@@ -148,9 +171,11 @@ The dashboard is a thin client over a small REST API you can use directly:
 | `POST /api/auth/login/complete` | Finish the login (JSON body `{"callback_url": "…"}`) and store the token |
 | `GET /health` | Health check (used by the HA watchdog and Docker) |
 
-> 🔐 **CSRF protection:** every `POST`/`DELETE` request must carry an
-> `X-Requested-With` header (any value). Without it the API answers 403 —
-> this blocks cross-site request forgery from malicious websites. Example:
+> 🔐 **CSRF protection:** every `POST`/`DELETE` request — and the two
+> expensive export `GET`s — must carry an `X-Requested-With` header (any
+> value). Without it the API answers 403 — this blocks cross-site request
+> forgery, and hot-linking the exports cross-site to burn CPU and disk I/O.
+> Example:
 >
 > ```bash
 > curl -X POST -H 'X-Requested-With: cli' 'http://localhost:9000/api/sync?month=2026-06'
@@ -170,6 +195,18 @@ uv run pytest
 # after editing dependencies in pyproject.toml:
 uv lock && uv export --no-dev --no-hashes --no-emit-project --output-file requirements.txt
 ```
+
+Releases use **calendar versioning**: `YYYY.MM.DD.N`, e.g. `2026.07.18.1` —
+the date the release was published plus a counter for multiple releases on
+the same day. Publishing a GitHub release with that tag builds and pushes the
+matching image tag (see [docker.yml](.github/workflows/docker.yml)); the
+[Home Assistant app](https://github.com/steiner-dominik/home-assistant-apps)
+pins exactly that tag.
+
+The app icon set (favicon with automatic light/dark switching, PWA and
+Home Assistant icons) is generated from one SVG template — edit and re-run
+[scripts/make_icons.py](scripts/make_icons.py)
+(`uv run --with cairosvg python scripts/make_icons.py app/static/icons`).
 
 The layout is deliberately small: [app/api.py](app/api.py) (Tesla API client + auth),
 [app/downloader.py](app/downloader.py) (invoice download + PDF cost extraction),
@@ -193,6 +230,37 @@ JSON file per language, no code changes needed:
    toggle.
 3. Open a pull request. You can test locally by starting the app and switching
    the language in the top-right corner.
+
+## 📦 Dependencies, SBOM & continuity
+
+Every dependency is pinned: `uv.lock` is the source of truth, and
+`requirements.txt` (what the Docker image installs) is exported from it and
+verified in CI. On top of that:
+
+- **SBOM per release** — each GitHub release carries an `sbom.cdx.json`
+  asset ([CycloneDX](https://cyclonedx.org/)) listing every Python package
+  and version in that release, ready for vulnerability scanners.
+- **SBOM in the image** — the published Docker images embed an SBOM
+  attestation and build provenance; inspect them with
+  `docker buildx imagetools inspect ghcr.io/steiner-dominik/tesla-invoices:latest --format '{{ json .SBOM }}'`.
+
+**If this project ever becomes unmaintained**, everything needed to keep it
+alive is in this repository — no build secrets, no external services:
+
+1. Fork the repository.
+2. Update the dependencies: `uv lock --upgrade`, then regenerate the
+   requirements export
+   (`uv export --no-dev --no-hashes --no-emit-project --output-file requirements.txt`)
+   and run `uv run pytest` to confirm nothing broke.
+3. Build and run your own image: `docker build -t tesla-invoices .` — the
+   [Dockerfile](Dockerfile) has no private inputs. Publishing a GitHub
+   release in your fork rebuilds the multi-arch image on GitHub's
+   infrastructure automatically.
+4. Home Assistant users: fork
+   [home-assistant-apps](https://github.com/steiner-dominik/home-assistant-apps)
+   too and point `ha-tesla-invoices/config.yaml`'s `image:` key at your own
+   GHCR image (`ghcr.io/<your-user>/tesla-invoices`), then add your fork as
+   an app repository.
 
 ## ❤️ Support the project
 

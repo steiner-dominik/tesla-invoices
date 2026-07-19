@@ -103,6 +103,7 @@
     "dlg_delete_pdf": "Delete \"{file}\"?\n\nIts metadata entry is deleted too, and the PDF will be downloaded again on the next sync as long as its invoice exists at Tesla.",
     "dlg_delete_json": "Delete \"{file}\"?\n\nThis is a metadata file: without it the invoice looks brand new again — if automatic email export is enabled, it may be emailed a second time.",
     "delete_failed": "Deleting failed: {error}",
+    "export_failed": "Export failed: {error}",
     "pdf_close": "Close",
     "footer_disclaimer": "Not affiliated with Tesla, Inc.",
     "setup_banner_text": "Welcome! Connect your Tesla account to start downloading your invoices — no configuration needed.",

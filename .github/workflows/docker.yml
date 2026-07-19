@@ -6,7 +6,8 @@ name: Docker
 #   - Home Assistant app: the home-assistant-apps repository config.yaml references
 #     this image via its `image:` key; the Supervisor pulls `<image>:<version>`,
 #     so every app release needs a matching image tag (published releases
-#     here are tagged with the calendar version, e.g. 2026.07.01).
+#     here are tagged with the calendar version, e.g. 2026.07.18.1 —
+#     YYYY.MM.DD.N, where N counts releases on the same day).
 
 on:
   release:
@@ -48,13 +49,17 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=pr
-            # Zero-padded CalVer (e.g. 2026.07.01) is not valid semver
+            # Zero-padded CalVer (e.g. 2026.07.18.1) is not valid semver
             # (leading zeros), so type=semver would skip the tag — match the
-            # release tag explicitly instead. The second rule adds a monthly
-            # convenience tag (2026.07); `latest` is applied automatically
-            # (flavor latest=auto also covers type=match).
+            # release tag explicitly instead. The second and third rules add
+            # daily (2026.07.18) and monthly (2026.07) convenience tags;
+            # `latest` is applied automatically (flavor latest=auto also
+            # covers type=match). The last rule keeps the pre-2026.07.18
+            # YYYY.MM.patch release tags building, should one ever be re-run.
+            type=match,pattern=^(\d{4}\.\d{2}\.\d{2}\.\d+)$,group=1
+            type=match,pattern=^(\d{4}\.\d{2}\.\d{2})\.\d+$,group=1
+            type=match,pattern=^(\d{4}\.\d{2})\.\d{2}(\.\d+)?$,group=1
             type=match,pattern=^(\d{4}\.\d{2}\.\d{2})$,group=1
-            type=match,pattern=^(\d{4}\.\d{2})\.\d{2}$,group=1
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -64,3 +69,29 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           push: ${{ github.event_name != 'pull_request' }}
+          # Embed an SBOM attestation and build provenance into the pushed
+          # image (inspect with `docker buildx imagetools inspect ... --format
+          # '{{ json .SBOM }}'`), so the image contents stay auditable even
+          # if this repository disappears.
+          sbom: true
+          provenance: mode=max
+
+  # A human-usable CycloneDX SBOM as a release asset, generated from the
+  # pinned requirements.txt (the exported uv.lock the image installs from) —
+  # see README "Dependencies, SBOM & continuity".
+  sbom:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Generate SBOM (CycloneDX JSON)
+        run: uvx --from cyclonedx-bom cyclonedx-py requirements requirements.txt --of JSON -o sbom.cdx.json
+      - name: Attach SBOM to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload '${{ github.event.release.tag_name }}' sbom.cdx.json --clobber

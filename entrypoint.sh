@@ -9,7 +9,11 @@ set -e
 if [ "$(id -u)" = "0" ]; then
     for dir in /data /opt/tesla-invoices/invoices /opt/tesla-invoices/secrets; do
         if [ -d "$dir" ]; then
-            chown -R tesla:tesla "$dir" 2>/dev/null \
+            # find instead of `chown -R`: symlinks are skipped entirely, so a
+            # malicious link planted inside a mounted volume can never redirect
+            # the chown to a host file (e.g. /etc/shadow), and -xdev keeps the
+            # walk on the volume itself.
+            find "$dir" -xdev ! -type l -exec chown tesla:tesla {} + 2>/dev/null \
                 || echo "WARNING: could not chown $dir (read-only mount?)" >&2
         fi
     done

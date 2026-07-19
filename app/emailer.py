@@ -9,6 +9,7 @@ from pathlib import Path
 
 from app import storage
 from app.config import Config
+from app.privacy import redact_vin
 
 logger = logging.getLogger(__name__)
 
@@ -243,8 +244,9 @@ class EmailExporter:
         )
         smtp.send_message(email)
 
-        # No recipient address in the log — logs may end up in bug reports.
-        logger.info(f"Sent invoice {pdf.name} by email")
+        # No recipient address (and no full VIN, which the file name embeds)
+        # in the log — logs may end up in bug reports.
+        logger.info(f"Sent invoice {redact_vin(pdf.name)} by email")
         # A manual send of a previously skipped invoice resolves the skip.
         storage.update_json(metadata_path, {"email_sent": int(time.time())}, remove=("email_skipped",))
 
@@ -303,7 +305,7 @@ class EmailExporter:
                         except (smtplib.SMTPException, OSError) as e:
                             # OSError too: one unreadable PDF must not abort
                             # the loop and silently skip everything after it.
-                            logger.error(f"Failed to send mail for {pdf.name}: {e}")
+                            logger.error(f"Failed to send mail for {redact_vin(pdf.name)}: {e}")
             except (smtplib.SMTPException, OSError) as e:
                 logger.error(f"Email export via {self.config.email_server} failed: {e}")
 

@@ -23,7 +23,11 @@ def test_mutating_requests_require_csrf_header(client):
     assert bare.post("/api/email/send-skipped").status_code == 403
     assert bare.delete("/api/files/invoice.pdf").status_code == 403
     assert (server.config.invoice_path / "invoice.pdf").exists()
-    # Reads stay open — forms cannot exfiltrate GET responses cross-origin
+    # The expensive export GETs also require the header: hot-linking them
+    # cross-site (e.g. via an <img> tag) for resource exhaustion is blocked.
+    assert bare.get("/api/export.csv").status_code == 403
+    assert bare.get("/api/export.zip").status_code == 403
+    # Other reads stay open — forms cannot exfiltrate GET responses cross-origin
     assert bare.get("/health").status_code == 200
 
 
@@ -562,3 +566,20 @@ def test_analytics_reports_invoice_type_switches(client):
     summary = client.get("/api/analytics").json()["summary"]
     assert summary["charging_invoice_enabled"] is True
     assert summary["subscription_invoice_enabled"] is True
+
+
+def test_pwa_manifest_and_service_worker_served_from_root(client):
+    manifest = client.get("/manifest.webmanifest")
+    assert manifest.status_code == 200
+    assert manifest.headers["content-type"].startswith("application/manifest+json")
+    body = manifest.json()
+    # Relative start_url/scope keep the PWA inside the HA ingress prefix
+    assert body["display"] == "standalone"
+    assert body["start_url"] == "."
+    assert body["scope"] == "."
+
+    sw = client.get("/sw.js")
+    assert sw.status_code == 200
+    assert "javascript" in sw.headers["content-type"]
+
+    assert client.get("/favicon.ico").status_code == 200

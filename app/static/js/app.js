@@ -1055,10 +1055,44 @@ async function deleteFile(filename) {
 
 document.getElementById('files-refresh-btn').addEventListener('click', loadFiles);
 
+// ---------- exports ----------
+
+// The export endpoints require the X-Requested-With header (see the CSRF
+// middleware), which a plain <a href> cannot send — fetch the file and hand
+// it to the browser as a download instead.
+async function downloadExport(url, filename, btn) {
+    btn.disabled = true;
+    try {
+        const response = await apiFetch(url);
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(await response.blob());
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(link.href);
+    } catch (error) {
+        console.error('Export failed:', error);
+        await showError(t('export_failed', { error: error.message }));
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+document.getElementById('export-csv-btn').addEventListener('click', (e) =>
+    downloadExport('api/export.csv', 'tesla_invoices.csv', e.target));
+document.getElementById('export-zip-btn').addEventListener('click', (e) =>
+    downloadExport('api/export.zip', 'tesla_invoices.zip', e.target));
+
 // ---------- startup ----------
 
 // Translations first, so the initial render is never half-translated.
 initI18n().then(loadData);
+// Makes the app installable as a PWA (standalone window). Relative URL, so
+// the worker registers under the ingress prefix too; failure is fine —
+// the dashboard works identically without it.
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+}
 // Refresh periodically so a running sync's results show up — but not
 // from hidden tabs (no point hammering the API in the background).
 setInterval(() => {
