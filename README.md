@@ -181,6 +181,26 @@ The dashboard is a thin client over a small REST API you can use directly:
 > curl -X POST -H 'X-Requested-With: cli' 'http://localhost:9000/api/sync?month=2026-06'
 > ```
 
+## 🏷️ Versioning & releases
+
+Releases use **calendar versioning**: `YYYY.MM.DD.N`, e.g. `2026.07.18.1` —
+the date the release was published plus a counter for multiple releases on
+the same day. Publishing a GitHub release with that tag builds and pushes the
+matching multi-arch image tag to GHCR (see
+[docker.yml](.github/workflows/docker.yml)); the
+[Home Assistant app](https://github.com/steiner-dominik/home-assistant-apps)
+pins exactly that tag.
+
+## 🔒 Security
+
+The web UI has **no authentication by default** — only expose port 9000 on a
+trusted network, set `BASIC_AUTH_USER`/`BASIC_AUTH_PASS` to require a login,
+or put it behind your reverse proxy's auth. The Tesla tokens are stored with
+strict file permissions and never leave the container — the browser only ever
+talks to this app, not to Tesla. Every `POST`/`DELETE` request (and the two
+expensive export `GET`s) must carry an `X-Requested-With` header as CSRF
+protection (see [API](#-api)).
+
 ## 🛠️ Development
 
 Dependencies are managed with [uv](https://docs.astral.sh/uv/); `uv.lock`
@@ -195,13 +215,6 @@ uv run pytest
 # after editing dependencies in pyproject.toml:
 uv lock && uv export --no-dev --no-hashes --no-emit-project --output-file requirements.txt
 ```
-
-Releases use **calendar versioning**: `YYYY.MM.DD.N`, e.g. `2026.07.18.1` —
-the date the release was published plus a counter for multiple releases on
-the same day. Publishing a GitHub release with that tag builds and pushes the
-matching image tag (see [docker.yml](.github/workflows/docker.yml)); the
-[Home Assistant app](https://github.com/steiner-dominik/home-assistant-apps)
-pins exactly that tag.
 
 The app icon set (favicon with automatic light/dark switching, PWA and
 Home Assistant icons) is generated from one SVG template — edit and re-run
