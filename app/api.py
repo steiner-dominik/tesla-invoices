@@ -1,9 +1,12 @@
 import base64
 import json
 import logging
+import os
 import ssl
+import tempfile
 import threading
 import time
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -236,11 +239,25 @@ class TokenManager:
 
     @staticmethod
     def _persist_token(path: Path, token: str) -> None:
+        """Tokens grant full account access: keep them out of reach of other
+        users on the host (relevant mainly for standalone deployments).
+
+        Written to a 0600 temp file and renamed into place, so the token is
+        never readable by others — not even for the moment between a write
+        and a later chmod — and a crash mid-write can never leave a truncated
+        token behind (which would lose the only valid refresh token).
+        """
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(token)
-        # Tokens grant full account access; keep them out of reach of other
-        # users on the host (relevant mainly for standalone deployments).
-        path.chmod(0o600)
+        # mkstemp creates the file with mode 0600 regardless of the umask
+        fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as tmp:
+                tmp.write(token)
+            os.replace(tmp_name, path)
+        except BaseException:
+            with suppress(OSError):
+                os.unlink(tmp_name)
+            raise
 
     def _determine_best_token(self, token_type: str, required: bool = True) -> str:
         if token_type == "access":
@@ -536,8 +553,12 @@ class TeslaAPIClient:
         url_products = "https://owner-api.teslamotors.com/api/1/products?orders=1"
         vehicles = {}
         products = self.base_req(url=url_products)
-        for product in products.get("response", []):
-            if "vin" in product:
+        # Tesla occasionally answers 200 with an HTML/plain-text body (e.g. a
+        # bot-mitigation page); fail with a clear error, not AttributeError.
+        if not isinstance(products, dict):
+            raise TeslaAPIError(f"Unexpected vehicle list response type: {type(products).__name__}")
+        for product in products.get("response") or []:
+            if isinstance(product, dict) and "vin" in product:
                 vehicles[product["vin"]] = product
         return vehicles
 

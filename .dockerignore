@@ -1,0 +1,13 @@
+# Keep local state and tooling out of the build context — above all secrets/
+# (live Tesla tokens in local development) and invoices/ (personal data).
+.git
+.github
+.venv
+.pytest_cache
+.ruff_cache
+**/__pycache__
+secrets
+invoices
+docker.env
+tests
+docs

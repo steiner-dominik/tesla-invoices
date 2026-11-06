@@ -204,8 +204,7 @@ protection (see [API](#-api)).
 ## 🛠️ Development
 
 Dependencies are managed with [uv](https://docs.astral.sh/uv/); `uv.lock`
-pins everything, and `requirements.txt` (used by the Docker image) is
-exported from it — regenerate both together when changing dependencies:
+pins everything, and the Docker image installs straight from it:
 
 ```bash
 uv sync            # creates .venv with all (dev) dependencies
@@ -213,7 +212,7 @@ uv run ruff check .
 uv run pytest
 
 # after editing dependencies in pyproject.toml:
-uv lock && uv export --no-dev --no-hashes --no-emit-project --output-file requirements.txt
+uv lock
 ```
 
 The app icon set (favicon with automatic light/dark switching, PWA and
@@ -246,9 +245,16 @@ JSON file per language, no code changes needed:
 
 ## 📦 Dependencies, SBOM & continuity
 
-Every dependency is pinned: `uv.lock` is the source of truth, and
-`requirements.txt` (what the Docker image installs) is exported from it and
-verified in CI. On top of that:
+Every dependency is pinned: `uv.lock` is the single source of truth — the
+Docker image installs exactly that lockfile, with every package verified
+against its locked hash. On top of that:
+
+- **Automated updates** — [Dependabot](.github/dependabot.yml) checks
+  weekly for new versions of the Python packages, the GitHub Actions (pinned
+  to commit SHAs) and the Docker base images, and opens a pull request for
+  each; CI runs the tests and a full multi-arch image build on every one.
+  Fresh releases wait a few days (a cooldown) before being proposed;
+  security fixes are proposed immediately.
 
 - **SBOM per release** — each GitHub release carries an `sbom.cdx.json`
   asset ([CycloneDX](https://cyclonedx.org/)) listing every Python package
@@ -261,10 +267,9 @@ verified in CI. On top of that:
 alive is in this repository — no build secrets, no external services:
 
 1. Fork the repository.
-2. Update the dependencies: `uv lock --upgrade`, then regenerate the
-   requirements export
-   (`uv export --no-dev --no-hashes --no-emit-project --output-file requirements.txt`)
-   and run `uv run pytest` to confirm nothing broke.
+2. Update the dependencies: `uv lock --upgrade`, then run `uv run pytest`
+   to confirm nothing broke (or simply merge the Dependabot pull requests,
+   which keep coming in your fork too once you enable Dependabot there).
 3. Build and run your own image: `docker build -t tesla-invoices .` — the
    [Dockerfile](Dockerfile) has no private inputs. Publishing a GitHub
    release in your fork rebuilds the multi-arch image on GitHub's

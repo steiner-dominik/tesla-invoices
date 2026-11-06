@@ -51,6 +51,22 @@ def test_basic_auth_protects_everything_but_health(client, monkeypatch):
     assert client.get("/api/analytics", headers={"Authorization": "Bearer token"}).status_code == 401
 
 
+
+def test_basic_auth_accepts_non_ascii_credentials(client, monkeypatch):
+    # secrets.compare_digest raises TypeError on non-ASCII str — that used to
+    # turn every request into a 500 once such a password was configured.
+    import base64
+
+    monkeypatch.setattr(server.config, "basic_auth_user", "admin")
+    monkeypatch.setattr(server.config, "basic_auth_pass", "Grüße€")
+
+    def header(credentials: str) -> dict[str, str]:
+        return {"Authorization": "Basic " + base64.b64encode(credentials.encode()).decode()}
+
+    assert client.get("/api/analytics", headers=header("admin:Grüße€")).status_code == 200
+    assert client.get("/api/analytics", headers=header("admin:Grüsse")).status_code == 401
+    assert client.get("/api/analytics", headers=header("ädmin:Grüße€")).status_code == 401
+
 def test_health(client):
     response = client.get("/health")
     assert response.status_code == 200

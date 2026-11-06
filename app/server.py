@@ -177,9 +177,12 @@ def _basic_auth_ok(header: str) -> bool:
         user, _, password = base64.b64decode(encoded.strip()).decode().partition(":")
     except (binascii.Error, UnicodeDecodeError):
         return False
-    # compare_digest on both parts: no timing oracle for the user name either
-    user_ok = secrets.compare_digest(user, config.basic_auth_user)
-    return secrets.compare_digest(password, config.basic_auth_pass) and user_ok
+    # compare_digest on both parts: no timing oracle for the user name either.
+    # Compared as UTF-8 bytes: on str, compare_digest raises TypeError for
+    # any non-ASCII character, which turned a password like "Grüße" (or a
+    # client sending one) into an HTTP 500 instead of a login.
+    user_ok = secrets.compare_digest(user.encode(), config.basic_auth_user.encode())
+    return secrets.compare_digest(password.encode(), config.basic_auth_pass.encode()) and user_ok
 
 
 # Registered after (= wrapped around) the CSRF middleware, so unauthenticated

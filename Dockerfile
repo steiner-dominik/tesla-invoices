@@ -1,3 +1,8 @@
+# uv only exports the lockfile during the build; it never ends up in the
+# final image. A named stage (rather than an inline --mount image) so
+# Dependabot sees and bumps the pinned uv version.
+FROM ghcr.io/astral-sh/uv:0.13.7 AS uv
+
 FROM python:3.14-alpine
 
 # tzdata makes time zones work: TZ env var (standalone) and the Home
@@ -11,10 +16,15 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /opt/tesla-invoices
 
-# requirements.txt is generated from uv.lock (fully pinned, transitive
-# dependencies included) so image builds are reproducible.
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Installed straight from uv.lock (fully pinned, transitive dependencies
+# included) so image builds are reproducible, and with --require-hashes so
+# pip refuses any file whose hash differs from the one locked — a tampered
+# or substituted package fails the build instead of landing in the image.
+COPY pyproject.toml uv.lock ./
+RUN --mount=from=uv,source=/uv,target=/bin/uv \
+    uv export --frozen --no-dev --no-emit-project --output-file /tmp/requirements.txt \
+    && pip install --no-cache-dir --require-hashes -r /tmp/requirements.txt \
+    && rm /tmp/requirements.txt
 
 COPY app ./app
 COPY entrypoint.sh /entrypoint.sh

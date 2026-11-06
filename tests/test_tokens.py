@@ -68,6 +68,24 @@ class TestDetermineBestToken:
         TokenManager(config)._determine_best_token("refresh")
         assert config.refresh_token_path.stat().st_mode & 0o777 == 0o600
 
+    def test_persist_token_is_atomic_and_never_world_readable(self, tmp_path, monkeypatch):
+        import os
+
+        # Even with a permissive umask, the token must never exist on disk
+        # with group/other permissions, and an existing token is replaced
+        # in one step (no truncated file on a crash mid-write).
+        old_umask = os.umask(0o000)
+        try:
+            path = tmp_path / "secrets" / "refresh_token.txt"
+            TokenManager._persist_token(path, "first")
+            TokenManager._persist_token(path, "second")
+        finally:
+            os.umask(old_umask)
+        assert path.read_text() == "second"
+        assert path.stat().st_mode & 0o777 == 0o600
+        # No temp files left behind
+        assert [p.name for p in path.parent.iterdir()] == ["refresh_token.txt"]
+
     def test_refresh_token_alone_is_enough(self, tmp_path, monkeypatch):
         # Users often only have a refresh token; the access token must be
         # bootstrapped via the refresh flow instead of failing at startup.
@@ -284,6 +302,20 @@ class TestAPIClient:
         with pytest.raises(TeslaAPIError):
             client._expect_pdf(b"<html>Access Denied</html>", "charging invoice x")
         assert client._expect_pdf(b"%PDF-1.4", "charging invoice x") == b"%PDF-1.4"
+
+    def test_non_json_vehicle_list_raises_api_error(self, tmp_path, monkeypatch):
+        config = make_config(tmp_path)
+        client = TeslaAPIClient(config, TokenManager(config))
+        # base_req hands back the raw response for non-JSON bodies (e.g. an
+        # HTML bot-mitigation page); that must not surface as AttributeError.
+        monkeypatch.setattr(client, "base_req", lambda **_: requests.Response())
+        with pytest.raises(TeslaAPIError, match="Unexpected vehicle list response"):
+            client.get_vehicles()
+
+        monkeypatch.setattr(
+            client, "base_req", lambda **_: {"response": [{"vin": "VIN1"}, "garbage", {"id": 1}]}
+        )
+        assert list(client.get_vehicles()) == ["VIN1"]
 
     def test_charging_history_paginates_and_filters_by_vin(self, tmp_path, monkeypatch):
         config = make_config(tmp_path)

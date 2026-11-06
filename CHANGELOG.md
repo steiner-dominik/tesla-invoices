@@ -1,4 +1,40 @@
 <!-- https://developers.home-assistant.io/docs/apps/presentation#keeping-a-changelog -->
+## 2026.11.06.1
+
+- **Security updates for all dependencies**, closing 39 known
+  vulnerabilities in the previously pinned versions — most of them in the
+  PDF parser (pypdf 6.14.2 → 6.21.4, 34 advisories), plus urllib3
+  (2.7.0 → 2.8.0) and the CA certificate bundle (certifi 2026.10.23).
+  Also updated: FastAPI 0.162, Starlette 1.10, uvicorn 0.54, curl_cffi
+  0.17 (the browser-TLS-fingerprint transport for the Tesla login, verified
+  to still present a Chrome fingerprint) and pydantic 2.14.
+- **Automated dependency updates**: Dependabot now checks weekly for new
+  versions of the Python packages, GitHub Actions and Docker base images
+  and opens a pull request for each, tested by CI (including a full
+  multi-arch image build). New releases wait a short cooldown before being
+  proposed; security fixes are proposed immediately.
+- **Supply-chain hardening**: the Docker image now installs directly from
+  `uv.lock` with **hash verification** — a tampered or substituted package
+  fails the build. The separately exported `requirements.txt` is gone (one
+  less file to keep in sync). All GitHub Actions are pinned to commit SHAs
+  and updated to their current releases (Node 24 runtime), and CI runs with
+  a read-only token. A new `.dockerignore` keeps local tokens and invoices
+  out of the Docker build context.
+
+Fixes:
+
+- **Login with a non-ASCII password no longer fails with HTTP 500**: with
+  `BASIC_AUTH_USER`/`BASIC_AUTH_PASS` set, a password (or a submitted login)
+  containing characters like `ä` or `€` crashed every request instead of
+  being checked.
+- **Token files are written atomically and are never readable by other
+  users**, not even for a moment: they used to be written with the default
+  permissions and only then restricted, and a crash mid-write could leave a
+  truncated (lost) refresh token.
+- An unexpected non-JSON answer from Tesla's vehicle list (e.g. a
+  bot-mitigation page) now fails the sync with a clear error instead of an
+  internal `AttributeError`.
+
 ## 2026.07.19.1
 
 - **New versioning scheme**: releases are now fully date-based —
