@@ -145,8 +145,12 @@ function rowVehicle(item) {
     return item.vehicle_name || item.vin || '';
 }
 
+// Charts span every month from the first invoice to the last, so a
+// placeholder date (Tesla's 0001-01-01) would draw ~24,000 months and
+// freeze the page for seconds. No Tesla invoice predates 2012.
 function monthKey(dateStr) {
-    return (dateStr || '').slice(0, 7); // YYYY-MM
+    const key = (dateStr || '').slice(0, 7); // YYYY-MM
+    return key >= '2012' ? key : '';
 }
 
 // Numbers and month labels follow the UI language (de: 1.234,56)

@@ -570,3 +570,44 @@ def test_nameless_charging_invoice_is_stored_as_pdf_and_old_files_move(tmp_path)
     meta = json.loads(pdf.with_suffix(".json").read_text())
     assert meta["email_sent"] == "x" and meta["filename"] == pdf.name  # the sidecar moved with it
     assert sorted(p.name for p in config.invoice_path.iterdir()) == [pdf.with_suffix(".json").name, pdf.name]
+
+
+
+class TestInvoiceDateFromPdf:
+    @pytest.mark.parametrize(
+        ("text", "currency", "expected"),
+        [
+            # PT: a table, the label heads a column, values follow the other headers
+            ("Data da fatura\n Cliente\n NIF\n514063858\n FT VEH999/53776\n 06/07/2023\n", "EUR", (2023, 7, 6)),
+            ("Rechnungsdatum: 06.07.2023", "EUR", (2023, 7, 6)),
+            ("Invoice Date 07/06/2023", "USD", (2023, 7, 6)),  # US prints month/day
+            ("Invoice Date 13/06/2023", "USD", (2023, 6, 13)),  # unambiguous wins over currency
+            ("Invoice date 2023-07-06", "GBP", (2023, 7, 6)),
+            ("Fecha de factura 6-7-23", "EUR", (2023, 7, 6)),
+            ("Total 8,12 EUR", "EUR", None),
+            ("Invoice Date 31/02/2023", "EUR", None),
+        ],
+    )
+    def test_extract_date(self, monkeypatch, text, currency, expected):
+        monkeypatch.setattr(InvoiceDownloader, "_pdf_text", staticmethod(lambda _b: text))
+        result = InvoiceDownloader.extract_date_from_pdf(b"%PDF", currency)
+        assert (result and (result.year, result.month, result.day)) == (expected or None)
+
+    def test_placeholder_dated_invoice_gets_the_pdf_date(self, tmp_path, monkeypatch):
+        config = make_config(tmp_path)
+        invoice = {"InvoiceDate": "0001-01-01T00:00:00", "InvoiceId": "INV-1", "InvoiceFileName": "i.pdf"}
+        monkeypatch.setattr(InvoiceDownloader, "extract_cost_from_pdf", staticmethod(lambda _b: (8.12, "EUR")))
+        reads = []
+
+        def pdf_date(_b, _currency):
+            reads.append(1)
+            return datetime(2023, 7, 6)
+
+        monkeypatch.setattr(InvoiceDownloader, "extract_date_from_pdf", staticmethod(pdf_date))
+        downloader = InvoiceDownloader(config, _subscription_client([invoice]))
+        downloader.download_invoices()
+        downloader.download_invoices()  # the second sync reuses the stored date
+
+        sidecar = config.invoice_path / "tesla_subscription_invoice_VIN123_0001-01-01.json"
+        assert json.loads(sidecar.read_text())["date"] == "2023-07-06T00:00:00"
+        assert reads == [1]
