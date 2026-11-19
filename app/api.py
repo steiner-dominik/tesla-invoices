@@ -647,7 +647,12 @@ class TeslaAPIClient:
     @staticmethod
     def _expect_pdf(response: Any, what: str) -> bytes:
         """Tesla sometimes answers 200 with a JSON/HTML error body; writing
-        that to disk would corrupt the invoice, so fail the single item."""
+        that to disk would corrupt the invoice, so fail the single item.
+        Some PDFs arrive with another Content-Type (old Portuguese charging
+        invoices come as application/xml, named INVOICESTATUS….XML), so the
+        content decides, not the header."""
+        if isinstance(response, requests.Response):
+            response = response.content
         if not isinstance(response, (bytes, bytearray)):
             raise TeslaAPIError(f"Expected PDF content for {what}, got {type(response).__name__}")
         content = bytes(response)

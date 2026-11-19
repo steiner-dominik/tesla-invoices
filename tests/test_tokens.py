@@ -303,6 +303,17 @@ class TestAPIClient:
             client._expect_pdf(b"<html>Access Denied</html>", "charging invoice x")
         assert client._expect_pdf(b"%PDF-1.4", "charging invoice x") == b"%PDF-1.4"
 
+    def test_expect_pdf_goes_by_content_not_content_type(self, tmp_path):
+        # Old Portuguese charging invoices are PDFs served as application/xml.
+        client = TeslaAPIClient(make_config(tmp_path), TokenManager(make_config(tmp_path)))
+        response = requests.Response()
+        response._content = b"%PDF-1.4 real invoice"
+        response.headers["Content-Type"] = "application/xml"
+        assert client._expect_pdf(response, "charging invoice x") == b"%PDF-1.4 real invoice"
+        response._content = b"<?xml version='1.0'?><status/>"
+        with pytest.raises(TeslaAPIError):
+            client._expect_pdf(response, "charging invoice x")
+
     def test_non_json_vehicle_list_raises_api_error(self, tmp_path, monkeypatch):
         config = make_config(tmp_path)
         client = TeslaAPIClient(config, TokenManager(config))
