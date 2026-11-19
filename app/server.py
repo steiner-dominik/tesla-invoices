@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
+from starlette.middleware.gzip import GZipMiddleware
 
 from app import auth, storage
 from app.api import TeslaAPIClient, TeslaAuthError, TokenManager
@@ -141,6 +142,21 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Tesla Invoices", lifespan=lifespan)
 
+
+class CompressTextResponses:
+    """gzip for the API's JSON and the UI files (/api/analytics: ~116 KB for
+    300 invoices, ~10 KB compressed). Never for PDFs or the ZIP export: they
+    are compressed already, and recompressing them costs a small box real CPU."""
+
+    def __init__(self, app):
+        self.app = app
+        self.gzip = GZipMiddleware(app, minimum_size=1024)
+
+    async def __call__(self, scope, receive, send):
+        path = scope.get("path", "") if scope["type"] == "http" else ""
+        skip = path.startswith("/api/download/") or path == "/api/export.zip"
+        await (self.app if skip else self.gzip)(scope, receive, send)
+
 # Stylesheet, scripts and the translation files (static/i18n/*.json). The
 # dashboard references them with RELATIVE paths so they stay inside the Home
 # Assistant ingress prefix.
@@ -238,6 +254,10 @@ async def cache_ui_files(request: Request, call_next):
     elif path in ("/", "/sw.js", "/manifest.webmanifest"):
         response.headers["Cache-Control"] = "no-cache"
     return response
+
+
+# Added last, so it is the outermost layer and compresses every final response.
+app.add_middleware(CompressTextResponses)
 
 
 @app.get("/")
