@@ -2,6 +2,19 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app.server as server
+from app.api import TokenManager
+
+from .helpers import make_jwt
+
+REAL_RUN_SYNC = server._run_sync
+
+
+def fake_tesla_login(tm, sub):
+    """What a successful Tesla login leaves in a token manager's account."""
+    tm.refresh_token = make_jwt({"sub": sub, "iat": 1})
+    tm.access_token = make_jwt({"sub": sub, "exp": 9999999999})
+    tm._persist_token(tm.account.refresh_token_path, tm.refresh_token)
+    tm._persist_token(tm.account.access_token_path, tm.access_token)
 
 
 @pytest.fixture
@@ -9,6 +22,10 @@ def client(tmp_path, monkeypatch):
     invoice_dir = tmp_path / "invoices"
     invoice_dir.mkdir()
     monkeypatch.setattr(server.config, "invoice_path", invoice_dir)
+    monkeypatch.setattr(server.config, "refresh_token_path", tmp_path / "secrets" / "refresh_token.txt")
+    monkeypatch.setattr(server.config, "access_token_path", tmp_path / "secrets" / "access_token.txt")
+    server._init_accounts()
+    server._sync_state["accounts"].clear()
     # No `with` block: the download loop (lifespan) must not start in tests.
     # The X-Requested-With header is what the real frontend sends on every
     # request; mutating endpoints reject requests without it (CSRF).
@@ -428,11 +445,12 @@ def test_auth_login_complete_exchanges_and_kicks_off_sync(client, monkeypatch):
     state = server._pending_login["state"]
 
     calls = []
-    monkeypatch.setattr(
-        server.downloader.client.token_manager,
-        "exchange_authorization_code",
-        lambda code, verifier: calls.append((code, verifier)),
-    )
+
+    def fake_exchange(tm, code, verifier):
+        calls.append((code, verifier))
+        fake_tesla_login(tm, "user-1")
+
+    monkeypatch.setattr(TokenManager, "exchange_authorization_code", fake_exchange)
     started = []
 
     async def fake_run_sync(*args, **kwargs):
@@ -444,17 +462,18 @@ def test_auth_login_complete_exchanges_and_kicks_off_sync(client, monkeypatch):
         "callback_url": f"tesla://auth/callback?code=THECODE&state={state}",
     })
     assert response.status_code == 200
-    assert response.json() == {"status": "connected"}
+    assert response.json() == {"status": "connected", "account": "default"}
     assert calls and calls[0][0] == "THECODE"
     assert server._pending_login == {}  # cleared after use
+    assert server.downloader.client.token_manager.user_id() == "user-1"
 
 
 def test_auth_login_complete_rejects_state_mismatch(client, monkeypatch):
     client.post("/api/auth/login/start")
     monkeypatch.setattr(
-        server.downloader.client.token_manager,
+        TokenManager,
         "exchange_authorization_code",
-        lambda code, verifier: (_ for _ in ()).throw(AssertionError("must not exchange on mismatch")),
+        lambda tm, code, verifier: (_ for _ in ()).throw(AssertionError("must not exchange on mismatch")),
     )
     response = client.post("/api/auth/login/complete", json={
         "callback_url": "tesla://auth/callback?code=X&state=WRONG",
@@ -529,11 +548,12 @@ def test_rescan_negates_credit_notes(client, monkeypatch):
 
 def test_auth_token_stores_refresh_token_and_reports_connected(client, monkeypatch):
     stored = []
-    monkeypatch.setattr(
-        server.downloader.client.token_manager,
-        "set_refresh_token",
-        lambda token: stored.append(token),
-    )
+
+    def fake_set(tm, token):
+        stored.append(token)
+        fake_tesla_login(tm, "user-1")
+
+    monkeypatch.setattr(TokenManager, "set_refresh_token", fake_set)
 
     async def fake_run_sync(*args, **kwargs):
         pass
@@ -542,15 +562,15 @@ def test_auth_token_stores_refresh_token_and_reports_connected(client, monkeypat
 
     response = client.post("/api/auth/token", json={"refresh_token": "  eyJx.token  "})
     assert response.status_code == 200
-    assert response.json() == {"status": "connected"}
+    assert response.json() == {"status": "connected", "account": "default"}
     assert stored == ["eyJx.token"]  # whitespace from copy-paste stripped
 
 
 def test_auth_token_rejects_empty(client, monkeypatch):
     monkeypatch.setattr(
-        server.downloader.client.token_manager,
+        TokenManager,
         "set_refresh_token",
-        lambda token: (_ for _ in ()).throw(AssertionError("must not be called for empty input")),
+        lambda tm, token: (_ for _ in ()).throw(AssertionError("must not be called for empty input")),
     )
     assert client.post("/api/auth/token", json={"refresh_token": "   "}).status_code == 422
 
@@ -558,10 +578,10 @@ def test_auth_token_rejects_empty(client, monkeypatch):
 def test_auth_token_invalid_token_is_502(client, monkeypatch):
     from app.api import TeslaAuthError
 
-    def reject(token):
+    def reject(tm, token):
         raise TeslaAuthError("Renewing the Tesla access token failed")
 
-    monkeypatch.setattr(server.downloader.client.token_manager, "set_refresh_token", reject)
+    monkeypatch.setattr(TokenManager, "set_refresh_token", reject)
     response = client.post("/api/auth/token", json={"refresh_token": "eyJbogus"})
     assert response.status_code == 502
 
@@ -599,6 +619,225 @@ def test_pwa_manifest_and_service_worker_served_from_root(client):
     assert "javascript" in sw.headers["content-type"]
 
     assert client.get("/favicon.ico").status_code == 200
+
+
+# ---------- several Tesla accounts ----------
+
+
+def connect(client, monkeypatch, sub, **target):
+    monkeypatch.setattr(TokenManager, "set_refresh_token", lambda tm, token: fake_tesla_login(tm, sub))
+    return client.post("/api/auth/token", json={"refresh_token": "eyJx", **target})
+
+
+@pytest.fixture
+def no_sync(monkeypatch):
+    started = []
+
+    async def fake_run_sync(*args, **kwargs):
+        started.append(kwargs.get("account_ids"))
+
+    monkeypatch.setattr(server, "_run_sync", fake_run_sync)
+    return started
+
+
+def test_add_second_account_and_list_it(client, monkeypatch, no_sync):
+    assert connect(client, monkeypatch, "user-1").json()["account"] == "default"
+    response = connect(client, monkeypatch, "user-2", name="Ana")
+    assert response.status_code == 200
+    ana = response.json()["account"]
+    assert ana != "default"
+    assert no_sync[-1] == [ana]  # the first sync after login is for that account only
+
+    accounts = client.get("/api/analytics").json()["summary"]["accounts"]
+    assert [(a["id"], a["name"], a["connected"]) for a in accounts] == [
+        ("default", "", True),
+        (ana, "Ana", True),
+    ]
+    assert "user-2" not in client.get("/api/analytics").text  # the Tesla user id never leaves
+
+
+def test_same_tesla_login_twice_is_refused(client, monkeypatch, no_sync):
+    connect(client, monkeypatch, "user-1")
+    client.patch("/api/accounts/default", json={"name": "Pedro"})
+
+    response = connect(client, monkeypatch, "user-1", name="Ana")
+
+    assert response.status_code == 409
+    assert "Pedro" in response.json()["detail"]
+    assert [a.id for a in server.registry.accounts()] == ["default"]
+    assert not list((server.config.refresh_token_path.parent / "accounts").glob("*"))
+
+
+def test_failed_login_for_a_new_account_leaves_nothing(client, monkeypatch, no_sync):
+    from app.api import TeslaAuthError
+
+    def reject(tm, token):
+        tm._persist_token(tm.account.refresh_token_path, "half-written")
+        raise TeslaAuthError("nope")
+
+    monkeypatch.setattr(TokenManager, "set_refresh_token", reject)
+    response = client.post("/api/auth/token", json={"refresh_token": "eyJx", "name": "Ana"})
+
+    assert response.status_code == 502
+    assert [a.id for a in server.registry.accounts()] == ["default"]
+    assert not list((server.config.refresh_token_path.parent / "accounts").glob("*"))
+    assert no_sync == []
+
+
+def test_login_target_validation(client):
+    assert client.post("/api/auth/login/start", json={"account": "nope"}).status_code == 404
+    assert client.post("/api/auth/login/start", json={"name": "  "}).status_code == 422
+    assert client.post("/api/auth/token", json={"refresh_token": "x", "account": "nope"}).status_code == 404
+
+
+def test_browser_login_for_a_new_account(client, monkeypatch, no_sync):
+    client.post("/api/auth/login/start", json={"name": "Ana"})
+    state = server._pending_login["state"]
+    monkeypatch.setattr(
+        TokenManager, "exchange_authorization_code", lambda tm, code, verifier: fake_tesla_login(tm, "user-2")
+    )
+    response = client.post(
+        "/api/auth/login/complete", json={"callback_url": f"tesla://auth/callback?code=C&state={state}"}
+    )
+    assert response.status_code == 200
+    assert response.json()["account"] != "default"
+    assert [a.name for a in server.registry.accounts()] == ["", "Ana"]
+
+
+def test_rename_and_remove_account(client, monkeypatch, no_sync):
+    ana = connect(client, monkeypatch, "user-2", name="Ana").json()["account"]
+
+    assert client.patch(f"/api/accounts/{ana}", json={"name": "Ana M."}).status_code == 200
+    assert client.patch("/api/accounts/nope", json={"name": "x"}).status_code == 404
+    assert client.delete("/api/accounts/default").status_code == 409
+    assert client.delete(f"/api/accounts/{ana}").status_code == 200
+    assert client.delete(f"/api/accounts/{ana}").status_code == 404
+    assert [a["id"] for a in client.get("/api/analytics").json()["summary"]["accounts"]] == ["default"]
+
+
+def test_one_failing_account_does_not_stop_the_others(client, monkeypatch, no_sync):
+    import asyncio
+
+    connect(client, monkeypatch, "user-1")
+    ana = connect(client, monkeypatch, "user-2", name="Ana").json()["account"]
+    monkeypatch.setattr(server.emailer, "send_pending", lambda *_: None)
+
+    synced = []
+
+    def fake_download(self, months):
+        if self.account_id == "default":
+            raise RuntimeError("Tesla said no")
+        synced.append(self.account_id)
+
+    monkeypatch.setattr(server.InvoiceDownloader, "download_invoices", fake_download)
+    server._sync_state["last_success"] = None
+    asyncio.run(REAL_RUN_SYNC(None, kind="test"))
+
+    assert synced == [ana]
+    assert server._sync_state["accounts"] == {"default": "Tesla said no", ana: "ok"}
+    assert server._sync_state["last_success"]  # one account synced
+    assert "Tesla said no" in server._sync_state["last_result"]
+
+
+def test_single_account_sync_state_reads_as_before(client, monkeypatch):
+    import asyncio
+
+    monkeypatch.setattr(server.emailer, "send_pending", lambda *_: None)
+    # No token anywhere: the default account still runs and reports why it failed
+    asyncio.run(server._run_sync(None, kind="test"))
+    assert server._sync_state["last_result"].startswith("No Tesla token configured")
+
+
+def test_accounts_without_a_token_are_not_synced(client, monkeypatch, no_sync):
+    import asyncio
+
+    ana = connect(client, monkeypatch, "user-2", name="Ana").json()["account"]  # the default has no token
+    monkeypatch.setattr(server.emailer, "send_pending", lambda *_: None)
+    synced = []
+    monkeypatch.setattr(
+        server.InvoiceDownloader, "download_invoices", lambda self, months: synced.append(self.account_id)
+    )
+
+    asyncio.run(REAL_RUN_SYNC(None, kind="test"))
+
+    assert synced == [ana]
+    assert server._sync_state["last_result"] == "ok"
+
+
+def test_new_account_name_can_come_with_the_pasted_address(client, monkeypatch, no_sync):
+    client.post("/api/auth/login/start")  # the dashboard starts the login before the name is typed
+    state = server._pending_login["state"]
+    monkeypatch.setattr(
+        TokenManager, "exchange_authorization_code", lambda tm, code, verifier: fake_tesla_login(tm, "user-2")
+    )
+    response = client.post(
+        "/api/auth/login/complete",
+        json={"callback_url": f"tesla://auth/callback?code=C&state={state}", "name": "Ana"},
+    )
+    assert response.status_code == 200
+    assert [a.name for a in server.registry.accounts()] == ["", "Ana"]
+    assert not server.downloader.client.token_manager.has_token()  # the main account was not touched
+
+
+def test_pasting_a_token_already_in_use_is_refused_before_tesla_sees_it(client, monkeypatch, no_sync):
+    connect(client, monkeypatch, "user-1")
+    monkeypatch.setattr(
+        TokenManager,
+        "set_refresh_token",
+        lambda tm, token: (_ for _ in ()).throw(AssertionError("verifying would rotate the main account's session")),
+    )
+    response = client.post(
+        "/api/auth/token", json={"refresh_token": make_jwt({"sub": "user-1", "iat": 2}), "name": "Ana"}
+    )
+    assert response.status_code == 409
+
+
+def test_added_account_cannot_be_renamed_to_blank(client, monkeypatch, no_sync):
+    ana = connect(client, monkeypatch, "user-2", name="Ana").json()["account"]
+    assert client.patch(f"/api/accounts/{ana}", json={"name": "  "}).status_code == 422
+    assert client.patch("/api/accounts/default", json={"name": ""}).status_code == 200
+
+
+def test_no_email_export_when_every_account_failed(client, monkeypatch):
+    import asyncio
+
+    sent = []
+    monkeypatch.setattr(server.emailer, "send_pending", lambda *_: sent.append(1))
+    asyncio.run(REAL_RUN_SYNC(None, kind="test"))  # no token anywhere: the only account fails
+    assert sent == []
+
+
+def test_reconnect_waits_for_a_running_token_refresh(client, monkeypatch, no_sync):
+    import threading
+    import time
+
+    connect(client, monkeypatch, "user-1")
+    tm = server.downloader.client.token_manager
+    old = make_jwt({"sub": "user-1", "exp": 1})
+    refreshing = threading.Event()
+
+    def slow_refresh():
+        # What a sync's refresh does: hold the lock, then persist its token.
+        with tm._lock:
+            refreshing.set()
+            time.sleep(0.3)
+            tm._persist_token(tm.account.access_token_path, old)
+
+    worker = threading.Thread(target=slow_refresh)
+    worker.start()
+    refreshing.wait()
+    new = make_jwt({"sub": "user-1", "exp": 9999999999, "iat": 5})
+
+    def fresh_login(staged_tm, token):
+        staged_tm._persist_token(staged_tm.account.refresh_token_path, new)
+        staged_tm._persist_token(staged_tm.account.access_token_path, new)
+
+    monkeypatch.setattr(TokenManager, "set_refresh_token", fresh_login)
+    response = client.post("/api/auth/token", json={"refresh_token": "opaque", "account": "default"})
+    worker.join()
+
+    assert response.status_code == 200
+    assert server.config.access_token_path.read_text() == new
 
 
 def test_dashboard_assets_are_served_under_content_hashes(client):
