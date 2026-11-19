@@ -362,6 +362,23 @@ class TestAPIClient:
         # duplicating every invoice once per vehicle on multi-vehicle accounts
         assert all(p["variables"]["vin"] == "VIN123" for p in payloads)
 
+    def test_account_wide_charging_history_sends_no_vin(self, tmp_path, monkeypatch):
+        # Sessions on other networks (IONITY) carry no VIN: only the
+        # account-wide history has them.
+        config = make_config(tmp_path)
+        client = TeslaAPIClient(config, TokenManager(config))
+        calls = []
+
+        def fake_base_req(url, method="get", json_data=None, params=None, extra_headers=None):
+            calls.append((json_data["variables"], params))
+            return {"data": {"me": {"charging": {"historyV2": {"data": [], "hasMoreData": False}}}}}
+
+        monkeypatch.setattr(client, "base_req", fake_base_req)
+        client.get_charging_history(None)
+
+        variables, params = calls[0]
+        assert "vin" not in variables and "vin" not in params
+
     def test_charging_history_reports_graphql_errors(self, tmp_path, monkeypatch):
         config = make_config(tmp_path)
         client = TeslaAPIClient(config, TokenManager(config))
