@@ -21,6 +21,7 @@ from starlette.background import BackgroundTask
 from starlette.middleware.gzip import GZipMiddleware
 
 from app import auth, storage
+from app.accounts import DEFAULT_ID, Account, AccountError, AccountRegistry, account_id_for_sub, clean_name
 from app.api import TeslaAPIClient, TeslaAuthError, TokenManager
 from app.config import Config
 from app.downloader import METADATA_VERSION, InvoiceDownloader
@@ -71,7 +72,28 @@ STATIC_DIR = Path(__file__).parent / "static"
 # supervisor/container runtime surfaces the error instead of running a zombie.
 config = Config.load()
 
-downloader = InvoiceDownloader(config, TeslaAPIClient(config, TokenManager(config)))
+# One downloader (with its own token manager) per Tesla account.
+registry: AccountRegistry
+downloaders: dict[str, InvoiceDownloader]
+# The default account's: rescans and the single-account code paths use it.
+downloader: InvoiceDownloader
+
+
+def _downloader_for(account: Account) -> InvoiceDownloader:
+    if account.id not in downloaders:
+        client = TeslaAPIClient(config, TokenManager(config, account))
+        downloaders[account.id] = InvoiceDownloader(config, client, account.id)
+    return downloaders[account.id]
+
+
+def _init_accounts() -> None:
+    global registry, downloaders, downloader
+    registry = AccountRegistry(config)
+    downloaders = {}
+    downloader = _downloader_for(registry.default())
+
+
+_init_accounts()
 emailer = EmailExporter(config)
 
 # Serializes scheduled and manually triggered downloads.
@@ -86,6 +108,8 @@ _sync_state: dict[str, Any] = {
     "last_finished": None,
     "last_result": None,
     "last_success": None,
+    # account id -> "ok" or the error of that account's last sync
+    "accounts": {},
 }
 
 
@@ -102,14 +126,43 @@ def _now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-async def _run_sync(months: list[datetime] | None, kind: str, skip_email: bool = False) -> None:
+def _label(account: Account) -> str:
+    return account.name or ("main account" if account.id == DEFAULT_ID else account.id)
+
+
+def _accounts_to_sync(account_ids: list[str] | None) -> list[Account]:
+    accounts = [a for a in registry.accounts() if account_ids is None or a.id in account_ids]
+    connected = [a for a in accounts if _downloader_for(a).client.token_manager.has_token()]
+    # With no token anywhere the default account still runs, so the sync
+    # reports "no token configured" exactly as a single-account install does.
+    return connected or accounts[:1]
+
+
+async def _run_sync(
+    months: list[datetime] | None, kind: str, skip_email: bool = False, account_ids: list[str] | None = None
+) -> None:
     async with _sync_lock:
         _sync_state.update({"running": True, "last_kind": kind})
         try:
-            await asyncio.to_thread(downloader.download_invoices, months)
-            await asyncio.to_thread(emailer.send_pending, skip_email)
-            _sync_state["last_result"] = "ok"
-            _sync_state["last_success"] = _now_iso()
+            accounts = _accounts_to_sync(account_ids)
+            errors = []
+            # One account failing (expired token, Tesla outage) must not keep
+            # the others from syncing.
+            for account in accounts:
+                try:
+                    await asyncio.to_thread(_downloader_for(account).download_invoices, months)
+                    _sync_state["accounts"][account.id] = "ok"
+                except Exception as e:
+                    who = f" for {_label(account)}" if len(registry.accounts()) > 1 else ""
+                    logger.error(f"Invoice sync ({kind}) failed{who}: {e}")
+                    _sync_state["accounts"][account.id] = str(e)
+                    errors.append(f"{_label(account)}: {e}" if who else str(e))
+            if len(errors) < len(accounts):
+                await asyncio.to_thread(emailer.send_pending, skip_email)
+            _sync_state["last_result"] = "; ".join(errors) or "ok"
+            # Any account that synced counts; the failed ones show in last_result.
+            if len(errors) < len(accounts):
+                _sync_state["last_success"] = _now_iso()
         except Exception as e:
             logger.error(f"Invoice sync ({kind}) failed: {e}")
             _sync_state["last_result"] = str(e)
@@ -354,6 +407,15 @@ def _collect_analytics() -> dict[str, Any]:
         # (by magnitude, so a currency holding only credit notes cannot win).
         primary_currency = max(cost_by_currency, key=lambda c: abs(cost_by_currency[c]), default="")
 
+    accounts = [
+        {
+            "id": a.id,
+            "name": a.name,
+            "connected": _downloader_for(a).client.token_manager.has_token(),
+            "last_result": _sync_state["accounts"].get(a.id),
+        }
+        for a in registry.accounts()
+    ]
     summary = {
         "cost_by_currency": {c: round(v, 2) for c, v in sorted(cost_by_currency.items())},
         "primary_currency": primary_currency,
@@ -373,7 +435,10 @@ def _collect_analytics() -> dict[str, Any]:
         "language": config.language,
         # Whether a Tesla token is configured; the UI shows the login flow
         # (and a setup banner) when this is false.
-        "token_configured": downloader.client.token_manager.has_token(),
+        "token_configured": any(a["connected"] for a in accounts),
+        # Every Tesla account, the default ("main") one first. Invoices carry
+        # their account's id; ones without belong to the default account.
+        "accounts": accounts,
         # With both switched off the UI shows a "connection check only,
         # nothing will be downloaded" banner.
         "charging_invoice_enabled": config.enable_charging_invoice,
@@ -501,25 +566,101 @@ async def trigger_sync(month: str = "all", skip_email: bool = False) -> dict[str
     return {"status": "started", "month": month}
 
 
-# Holds the PKCE verifier + state between login/start and login/complete.
-# Single-user app, so one in-flight login at a time is enough; lost on
-# restart, in which case the user simply starts the flow again.
-_pending_login: dict[str, str] = {}
+# Holds the PKCE verifier + state (and which account the login is for)
+# between login/start and login/complete. One in-flight login at a time is
+# enough; lost on restart, in which case the user simply starts again.
+_pending_login: dict[str, Any] = {}
+
+
+class LoginTarget(BaseModel):
+    """Which account a login is for: ``account`` reconnects an existing one,
+    ``name`` adds a new one, neither means the default account."""
+
+    account: str | None = None
+    name: str | None = None
+
+
+def _validated_target(target: LoginTarget | None) -> LoginTarget:
+    target = target or LoginTarget()
+    if target.account is not None and registry.get(target.account) is None:
+        raise HTTPException(status_code=404, detail="Unknown account")
+    if target.account is None and target.name is not None and not target.name.strip():
+        raise HTTPException(status_code=422, detail="Give the new account a name")
+    return target
+
+
+def _adopt_login(staged: Account, token_manager: TokenManager, target: LoginTarget) -> Account:
+    """Move a login Tesla accepted to its account, unless that Tesla user is
+    already connected as another account (e.g. the browser was still signed
+    in to the other person's Tesla account)."""
+    sub = token_manager.user_id()
+    if not sub:
+        raise AccountError("Tesla's token does not say which user it belongs to")
+    _refuse_duplicate(sub, target)
+    target_id = target.account or (DEFAULT_ID if target.name is None else account_id_for_sub(sub))
+    existing = downloaders.get(target_id)
+    if existing is None:
+        account = registry.adopt(staged, target.account, target.name if target.account is None else None, sub)
+        _downloader_for(account)
+        return account
+    # Under the account's own token lock: a sync refreshing this account's
+    # token right now would otherwise write the old session over the new one.
+    with existing.client.token_manager._lock:
+        account = registry.adopt(staged, target.account, target.name if target.account is None else None, sub)
+        existing.client.token_manager.load_tokens()
+    return account
+
+
+def _refuse_duplicate(sub: str, target: LoginTarget) -> None:
+    target_id = target.account or (None if target.name is not None else DEFAULT_ID)
+    for other in registry.accounts():
+        if other.id != target_id and _downloader_for(other).client.token_manager.user_id() == sub:
+            raise AccountError(f"This Tesla login is already connected as {_label(other)}")
+
+
+async def _connect(target: LoginTarget, exchange) -> dict[str, str]:
+    """Run ``exchange(token_manager)`` against a throwaway staging account,
+    adopt the result, and kick off a first sync for the account so the
+    dashboard is not empty after connecting. A failed login leaves nothing
+    behind — never an empty account, never a clobbered working token."""
+    global _manual_sync_task
+    staged = registry.staging()
+    token_manager = TokenManager(config, staged)
+    try:
+        await asyncio.to_thread(exchange, token_manager)
+        # In a thread: adopting may wait for a sync's token refresh to finish.
+        account = await asyncio.to_thread(_adopt_login, staged, token_manager, target)
+    except TeslaAuthError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except AccountError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    finally:
+        registry.discard(staged)
+    logger.info(f"Tesla account connected: {_label(account)}")
+    if not _sync_lock.locked():
+        _manual_sync_task = asyncio.create_task(
+            _run_sync(_current_and_previous_month(), kind="after login", account_ids=[account.id])
+        )
+    return {"status": "connected", "account": account.id}
 
 
 @app.post("/api/auth/login/start")
-async def auth_login_start() -> dict[str, str]:
+async def auth_login_start(target: LoginTarget | None = None) -> dict[str, str]:
     """Begin an interactive Tesla login: return the URL the user opens in
     their browser to sign in. No token is needed to call this — it is how a
     fresh install gets its first token."""
+    target = _validated_target(target)
     verifier, challenge = auth.generate_pkce()
     state = secrets.token_urlsafe(16)
     _pending_login.clear()
-    _pending_login.update({"verifier": verifier, "state": state})
+    _pending_login.update({"verifier": verifier, "state": state, "target": target})
     return {"url": auth.build_authorize_url(challenge, state)}
 
 
-class CallbackRequest(BaseModel):
+class CallbackRequest(LoginTarget):
+    """The target may also be given here: the dashboard asks for a new
+    account's name next to the pasted address, after the login started."""
+
     callback_url: str
 
 
@@ -528,7 +669,6 @@ async def auth_login_complete(payload: CallbackRequest) -> dict[str, str]:
     """Finish the login: parse the pasted callback URL, exchange the code for
     tokens, persist them, and kick off a first sync so invoices appear right
     away instead of only on the next poll."""
-    global _manual_sync_task
     code, state = auth.parse_callback(payload.callback_url)
     if not code:
         raise HTTPException(status_code=422, detail="No authorization code found in the pasted address")
@@ -542,21 +682,19 @@ async def auth_login_complete(payload: CallbackRequest) -> dict[str, str]:
     if state and expected_state and state != expected_state:
         raise HTTPException(status_code=422, detail="Login state mismatch — start the login again")
 
-    token_manager = downloader.client.token_manager
-    try:
-        await asyncio.to_thread(token_manager.exchange_authorization_code, code, verifier)
-    except TeslaAuthError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+    if payload.account is not None or payload.name is not None:
+        target = _validated_target(LoginTarget(account=payload.account, name=payload.name))
+    else:
+        target = _pending_login.get("target") or LoginTarget()
+    result = await _connect(
+        target,
+        lambda tm: tm.exchange_authorization_code(code, verifier),
+    )
     _pending_login.clear()
-
-    # Fetch the current and previous month immediately (unless a sync is
-    # already running), so the dashboard is not empty after connecting.
-    if not _sync_lock.locked():
-        _manual_sync_task = asyncio.create_task(_run_sync(_current_and_previous_month(), kind="after login"))
-    return {"status": "connected"}
+    return result
 
 
-class RefreshTokenRequest(BaseModel):
+class RefreshTokenRequest(LoginTarget):
     refresh_token: str
 
 
@@ -566,22 +704,52 @@ async def auth_set_refresh_token(payload: RefreshTokenRequest) -> dict[str, str]
     refresh token generated with a third-party tool (e.g. tesla_auth). The
     token is verified against Tesla before it is stored — a bad paste never
     replaces a working credential."""
-    global _manual_sync_task
     token = payload.refresh_token.strip()
     if not token:
         raise HTTPException(status_code=422, detail="No refresh token provided")
+    target = _validated_target(LoginTarget(account=payload.account, name=payload.name))
+    # Checked before Tesla sees the token: verifying it rotates the session,
+    # which would strand the account already using it with a dead token.
+    pasted_sub = str(TokenManager.jwt_decode(token).get("sub") or "")
+    if pasted_sub:
+        try:
+            _refuse_duplicate(pasted_sub, target)
+        except AccountError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
+    return await _connect(target, lambda tm: tm.set_refresh_token(token))
 
-    token_manager = downloader.client.token_manager
+
+class RenameRequest(BaseModel):
+    name: str
+
+
+@app.patch("/api/accounts/{account_id}")
+async def rename_account(account_id: str, payload: RenameRequest) -> dict[str, str]:
+    if account_id != DEFAULT_ID and not clean_name(payload.name):
+        raise HTTPException(status_code=422, detail="An added account needs a name")
     try:
-        await asyncio.to_thread(token_manager.set_refresh_token, token)
-    except TeslaAuthError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+        registry.rename(account_id, payload.name)
+    except AccountError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    return {"status": "renamed"}
 
-    # Same as after a browser login: fetch the current and previous month
-    # right away so the dashboard is not empty after connecting.
-    if not _sync_lock.locked():
-        _manual_sync_task = asyncio.create_task(_run_sync(_current_and_previous_month(), kind="after login"))
-    return {"status": "connected"}
+
+@app.delete("/api/accounts/{account_id}")
+async def remove_account(account_id: str) -> dict[str, str]:
+    """Disconnect an extra account: its tokens are deleted, its invoices stay."""
+    # A running sync could still refresh (and re-persist) this account's token.
+    if _sync_lock.locked():
+        raise HTTPException(status_code=409, detail="A sync is running — retry when it has finished")
+    if account_id == DEFAULT_ID:
+        raise HTTPException(status_code=409, detail="The main account cannot be removed")
+    try:
+        registry.remove(account_id)
+    except AccountError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    downloaders.pop(account_id, None)
+    _sync_state["accounts"].pop(account_id, None)
+    logger.info(f"Tesla account {account_id} removed")
+    return {"status": "removed"}
 
 
 def _resolve_invoice_file(filename: str, suffixes: tuple[str, ...]) -> Path:
