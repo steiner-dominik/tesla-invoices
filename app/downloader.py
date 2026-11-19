@@ -40,6 +40,18 @@ _CURRENCY_AMOUNT_RE = re.compile(
 # (e.g. "VAT 20.00" on English invoices).
 _NON_CURRENCY_WORDS = {"VAT", "TAX", "QTY", "NET"}
 
+# The invoice date as printed on the PDF, in the languages Tesla invoices
+# come in: the first date after the label. Some layouts are tables, where
+# the label heads a column and the date follows the other headers and values.
+_INVOICE_DATE_RE = re.compile(
+    r"(?:invoice\s*date|rechnungsdatum|data\s+da\s+fatura|data\s+(?:della\s+)?fattura|"
+    r"fecha\s+de\s+(?:la\s+)?factura|date\s+de\s+(?:la\s+)?facture|factuurdatum|fakturadatum)"
+    r"[\s\S]{0,200}?(?P<date>\d{1,4}[./-]\d{1,2}[./-]\d{2,4})",
+    re.IGNORECASE,
+)
+# Tesla returns 0001-01-01 for the InvoiceDate of some old invoices.
+_PLACEHOLDER_YEAR = 2000
+
 
 class InvoiceDownloader:
     def __init__(self, config: Config, client: TeslaAPIClient):
@@ -315,16 +327,46 @@ class InvoiceDownloader:
         return mapping.get(normalized, normalized)
 
     @staticmethod
+    def _pdf_text(pdf_bytes: bytes) -> str:
+        import io
+
+        import pypdf
+
+        reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+
+    @staticmethod
+    def extract_date_from_pdf(pdf_bytes: bytes, currency: str = "") -> datetime | None:
+        """The invoice date printed on the PDF, or None. Day-first unless the
+        date is unambiguous or the invoice is in USD (US invoices print
+        month/day); dotted dates are always day-first."""
+        try:
+            match = _INVOICE_DATE_RE.search(InvoiceDownloader._pdf_text(pdf_bytes))
+        except Exception as e:
+            logger.error(f"Failed to read the date from a PDF: {e}")
+            return None
+        if not match:
+            return None
+        raw = match.group("date")
+        parts = re.split(r"[./-]", raw)
+        a, b, c = (int(p) for p in parts)
+        if len(parts[0]) == 4:
+            year, month, day = a, b, c
+        else:
+            year = c + 2000 if c < 100 else c
+            month_first = "." not in raw and (a <= 12 < b or (b <= 12 and a <= 12 and currency == "USD"))
+            month, day = (a, b) if month_first else (b, a)
+        try:
+            return datetime(year, month, day)
+        except ValueError:
+            return None
+
+    @staticmethod
     def extract_cost_from_pdf(pdf_bytes: bytes) -> tuple[float, str]:
         """Returns (amount, currency); the amount keeps its sign so credit
         notes (negative totals) reduce the analytics instead of vanishing."""
         try:
-            import io
-
-            import pypdf
-
-            reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
-            text = "\n".join(page.extract_text() or "" for page in reader.pages)
+            text = InvoiceDownloader._pdf_text(pdf_bytes)
 
             # An invoice may carry several total lines (net, tax, gross);
             # the gross grand total is the largest of them (by magnitude).
@@ -440,12 +482,26 @@ class InvoiceDownloader:
                 # positive; analytics must subtract it either way.
                 total_cost = -abs(total_cost)
 
+        date = invoice_dt.isoformat()
+        if invoice_dt.year < _PLACEHOLDER_YEAR:
+            # The file keeps its placeholder-dated name (stable across syncs);
+            # the date the dashboard uses comes from the PDF itself.
+            known = str(existing_meta.get("date") or "")
+            if known[:4] >= str(_PLACEHOLDER_YEAR):
+                date = known
+            elif local_pdf_path.exists():
+                pdf_dt = self.extract_date_from_pdf(local_pdf_path.read_bytes(), currency)
+                if pdf_dt:
+                    date = pdf_dt.isoformat()
+                else:
+                    logger.warning(f"No invoice date found in {redact_vin(local_pdf_path.name)}")
+
         metadata = {
             "type": "subscription",
             "meta_version": METADATA_VERSION,
             "vin": vin,
             "vehicle_name": vehicle_name,
-            "date": invoice_dt.isoformat(),
+            "date": date,
             "filename": local_pdf_path.name,
             "total_cost": total_cost,
             "currency": currency,
