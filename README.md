@@ -58,6 +58,11 @@ Runs anywhere Docker runs — or as a
 - **Sign in from the dashboard** — no token wrangling: start the app, click
   **Connect Tesla account**, log in on Tesla's own page, and you're done. The
   token is obtained, rotated, and stored automatically with strict file permissions.
+- **Several Tesla accounts** — add a partner's or a company account under
+  *Maintenance → Add another Tesla account*; every account syncs into the same
+  dashboard, and an account filter appears as soon as there is more than one.
+  Extra accounts keep their tokens in `secrets/accounts/` next to
+  `refresh_token.txt`, so mount the whole `secrets` directory, not just the file.
 - **Installable as an app (PWA)** — open the dashboard in your browser and use
   *Install app* (Chrome/Edge) or *Add to Home Screen* (iOS Safari, Android) to
   get it as a standalone app with its own icon and window, no browser chrome.

@@ -66,6 +66,7 @@
             <div class="filter-bar">
                 <input type="search" id="filter-search" placeholder="Search location, vehicle, file…" data-i18n-placeholder="search_placeholder">
                 <select id="filter-year"><option value="" data-i18n="all_years">All years</option></select>
+                <select id="filter-account" hidden><option value="" data-i18n="all_accounts">All accounts</option></select>
                 <select id="filter-vehicle"><option value="" data-i18n="all_vehicles">All vehicles</option></select>
                 <select id="filter-type">
                     <option value="" data-i18n="all_types">All types</option>
@@ -149,11 +150,8 @@
                     happens on Tesla's own website; only the resulting token is stored (with strict file
                     permissions) and used to fetch invoices. Your password is never seen by this app.
                 </p>
-                <p class="account-state">
-                    <span data-i18n="account_status_label">Status:</span>
-                    <b id="account-status">-</b>
-                </p>
-                <button id="connect-btn" class="btn primary" type="button" data-i18n="btn_connect">Connect Tesla account</button>
+                <ul id="account-list" class="account-list"></ul>
+                <button id="add-account-btn" class="btn" type="button" data-i18n="account_add">Add another Tesla account</button>
                 <span id="connect-status" class="maint-status"></span>
             </div>
 
@@ -233,6 +231,10 @@
         <div class="modal-box dialog-box wide">
             <div class="modal-head"><span class="title" data-i18n="auth_dlg_title">Connect Tesla account</span></div>
             <div class="dialog-body">
+                <label id="auth-name-row" class="auth-name" hidden>
+                    <span data-i18n="account_name_label">Name for this account</span>
+                    <input id="auth-name" type="text" maxlength="40" autocomplete="off" data-i18n-placeholder="account_name_placeholder" placeholder="e.g. Ana">
+                </label>
                 <div class="method-switch" role="group">
                     <button type="button" data-auth-method="browser" class="active" data-i18n="auth_method_browser">Sign in with browser</button>
                     <button type="button" data-auth-method="token" data-i18n="auth_method_token">Paste refresh token</button>

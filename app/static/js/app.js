@@ -130,7 +130,7 @@ let allData = [];
 let summary = {};
 let syncState = {};
 let filesLoaded = false;
-const filters = { search: '', year: '', vehicle: '', type: '' };
+const filters = { search: '', year: '', account: '', vehicle: '', type: '' };
 const sort = { key: 'date', dir: -1 };
 
 // ---------- helpers ----------
@@ -141,8 +141,38 @@ function rowLocation(item) {
     return item.site_name || '';
 }
 
+// Invoices not tied to a car (charging on other networks, e.g. IONITY)
+// are filed under their account's name, so the vehicle filter reaches them.
 function rowVehicle(item) {
-    return item.vehicle_name || item.vin || '';
+    return item.vehicle_name || item.vin || accountName(rowAccount(item));
+}
+
+// Invoices from before multi-account support carry no account: they can
+// only have come from the default ("main") account.
+const REMOVED_ACCOUNT = '__removed__';
+
+function rowAccount(item) {
+    return item.account || 'default';
+}
+
+function accounts() {
+    return summary.accounts || [];
+}
+
+function accountName(id) {
+    const account = accounts().find((a) => a.id === id);
+    return account ? accountLabel(account) : t('account_removed');
+}
+
+function accountLabel(account) {
+    return account.name || (account.id === 'default' ? t('account_main') : account.id);
+}
+
+function matchesAccount(item) {
+    if (!filters.account) return true;
+    const owner = rowAccount(item);
+    if (filters.account === REMOVED_ACCOUNT) return !accounts().some((a) => a.id === owner);
+    return owner === filters.account;
 }
 
 // Charts span every month from the first invoice to the last, so a
@@ -212,6 +242,7 @@ function filteredData() {
     const q = filters.search.toLowerCase();
     return allData.filter((item) => {
         if (filters.year && !(item.date || '').startsWith(filters.year)) return false;
+        if (!matchesAccount(item)) return false;
         if (filters.vehicle && rowVehicle(item) !== filters.vehicle) return false;
         if (filters.type && item.type !== filters.type) return false;
         if (q) {
@@ -276,7 +307,7 @@ function renderCards(data) {
         if (c) currencies.add(item.currency || '');
         if ((item.currency || '') === primary) costPrimary += c;
         if (item.type === 'charging') kwh += item.energy_kwh || 0;
-        vehicles.add(rowVehicle(item));
+        vehicles.add(item.vehicle_name || item.vin); // real cars only, not the account fallback
     }
 
     document.getElementById('stat-count').textContent = data.length;
@@ -641,11 +672,64 @@ function renderAccountState() {
     // The banner only nudges first-time users; once connected it is gone
     banner.hidden = connected;
 
-    const statusEl = document.getElementById('account-status');
-    statusEl.textContent = connected ? t('account_connected') : t('account_disconnected');
-    statusEl.className = connected ? 'connected' : 'disconnected';
-    document.getElementById('connect-btn').textContent =
-        connected ? t('btn_reconnect') : t('btn_connect');
+    const list = document.getElementById('account-list');
+    const statusEl = document.getElementById('connect-status');
+    list.replaceChildren(...(accounts().length ? accounts() : [{ id: 'default', name: '' }]).map((account) => {
+        const li = document.createElement('li');
+        const name = document.createElement('span');
+        name.className = 'account-name';
+        name.textContent = accountLabel(account);
+        const state = document.createElement('span');
+        const failed = account.last_result && account.last_result !== 'ok';
+        state.className = 'account-state ' + (account.connected && !failed ? 'connected' : 'disconnected');
+        state.textContent = !account.connected ? t('account_disconnected')
+            : failed ? t('account_sync_failed', { error: account.last_result }) : t('account_connected');
+        li.append(name, state);
+
+        const button = (label, onClick) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'btn';
+            b.textContent = label;
+            b.addEventListener('click', onClick);
+            li.appendChild(b);
+        };
+        button(account.connected ? t('account_reconnect') : t('account_connect'),
+            () => startAuth(statusEl, { account: account.id }));
+        button(t('account_rename'), () => renameAccount(account));
+        if (account.id !== 'default') button(t('account_remove'), () => removeAccount(account));
+        return li;
+    }));
+}
+
+async function renameAccount(account) {
+    const result = await showDialog({
+        title: t('account_rename'),
+        message: t('account_name_label'),
+        input: { value: account.name, placeholder: t('account_name_placeholder') },
+    });
+    if (!result) return;
+    const response = await apiFetch('api/accounts/' + encodeURIComponent(account.id), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: result.value }),
+    });
+    if (!response.ok) await showError('HTTP ' + response.status);
+    loadData();
+}
+
+async function removeAccount(account) {
+    const ok = await showDialog({
+        title: t('account_remove'),
+        message: t('account_remove_confirm', { name: accountLabel(account) }),
+    });
+    if (!ok) return;
+    const response = await apiFetch('api/accounts/' + encodeURIComponent(account.id), { method: 'DELETE' });
+    if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        await showError(body.detail || ('HTTP ' + response.status));
+    }
+    loadData();
 }
 
 // Two ways in: the guided browser sign-in (default), or pasting a refresh
@@ -666,8 +750,15 @@ document.querySelectorAll('[data-auth-method]').forEach((btn) => {
     btn.addEventListener('click', () => setAuthMethod(btn.dataset.authMethod));
 });
 
-async function startAuth(statusEl) {
+// target: { account: id } reconnects that account, { add: true } adds a
+// new one (named in the dialog), null is the default account.
+async function startAuth(statusEl, target) {
     if (statusEl) statusEl.textContent = '';
+    const adding = !!(target && target.add);
+    const nameRow = document.getElementById('auth-name-row');
+    const nameInput = document.getElementById('auth-name');
+    nameRow.hidden = !adding;
+    nameInput.value = '';
 
     const modal = document.getElementById('auth-modal');
     const input = document.getElementById('auth-input');
@@ -707,6 +798,13 @@ async function startAuth(statusEl) {
     async function onComplete() {
         const isToken = authMethod === 'token';
         const value = (isToken ? tokenInput : input).value.trim();
+        const name = nameInput.value.trim();
+        if (adding && !name) {
+            errorEl.textContent = t('account_name_required');
+            errorEl.hidden = false;
+            return;
+        }
+        const targetFields = adding ? { name } : (target && target.account ? { account: target.account } : {});
         if (!value) {
             errorEl.textContent = t(isToken ? 'auth_token_empty' : 'auth_no_code');
             errorEl.hidden = false;
@@ -719,7 +817,10 @@ async function startAuth(statusEl) {
             const response = await apiFetch(isToken ? API_AUTH_TOKEN : API_AUTH_COMPLETE, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(isToken ? { refresh_token: value } : { callback_url: value }),
+                body: JSON.stringify({
+                    ...targetFields,
+                    ...(isToken ? { refresh_token: value } : { callback_url: value }),
+                }),
             });
             const body = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(body.detail || ('HTTP ' + response.status));
@@ -742,15 +843,28 @@ async function startAuth(statusEl) {
     document.addEventListener('keydown', onKey);
 }
 
-document.getElementById('setup-connect-btn').addEventListener('click', () => startAuth(null));
-document.getElementById('connect-btn').addEventListener('click', () =>
-    startAuth(document.getElementById('connect-status')));
+document.getElementById('setup-connect-btn').addEventListener('click', () => startAuth(null, null));
+document.getElementById('add-account-btn').addEventListener('click', () =>
+    startAuth(document.getElementById('connect-status'), { add: true }));
 
 // ---------- filters ----------
 
 function populateFilterOptions() {
     const years = [...new Set(allData.map((i) => (i.date || '').slice(0, 4)).filter(Boolean))].sort().reverse();
-    const vehicles = [...new Set(allData.map(rowVehicle).filter(Boolean))].sort();
+    // Only worth showing once there is more than one account to tell apart.
+    const accountSel = document.getElementById('filter-account');
+    const currentAccount = accountSel.value;
+    accountSel.replaceChildren(new Option(t('all_accounts'), ''));
+    accounts().forEach((a) => accountSel.appendChild(new Option(accountLabel(a), a.id)));
+    if (allData.some((i) => !accounts().some((a) => a.id === rowAccount(i)))) {
+        accountSel.appendChild(new Option(t('account_removed'), REMOVED_ACCOUNT));
+    }
+    accountSel.hidden = accountSel.options.length <= 2;
+    accountSel.value = [...accountSel.options].some((o) => o.value === currentAccount) ? currentAccount : '';
+    filters.account = accountSel.hidden ? '' : accountSel.value;
+
+    // The vehicle list follows the account filter: one account's cars only.
+    const vehicles = [...new Set(allData.filter(matchesAccount).map(rowVehicle).filter(Boolean))].sort();
 
     const yearSel = document.getElementById('filter-year');
     const current = yearSel.value;
@@ -778,6 +892,12 @@ document.getElementById('filter-search').addEventListener('input', (e) => {
 });
 document.getElementById('filter-year').addEventListener('change', (e) => {
     filters.year = e.target.value;
+    applyFilters();
+});
+document.getElementById('filter-account').addEventListener('change', (e) => {
+    filters.account = e.target.value;
+    populateFilterOptions();
+    filters.vehicle = document.getElementById('filter-vehicle').value;
     applyFilters();
 });
 document.getElementById('filter-vehicle').addEventListener('change', (e) => {
