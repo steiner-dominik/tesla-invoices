@@ -599,3 +599,22 @@ def test_pwa_manifest_and_service_worker_served_from_root(client):
     assert "javascript" in sw.headers["content-type"]
 
     assert client.get("/favicon.ico").status_code == 200
+
+
+def test_dashboard_assets_are_served_under_content_hashes(client):
+    import hashlib
+    import re
+
+    html = client.get("/").text
+    assert client.get("/").headers["cache-control"] == "no-cache"
+    expected = hashlib.sha256((server.STATIC_DIR / "js" / "app.js").read_bytes()).hexdigest()[:12]
+    assert f'src="static/js/app.js?v={expected}"' in html
+    # Every static reference in the page carries a hash, so none can go stale
+    assert not re.findall(r'(?:href|src)="static/[^"?]+"', html)
+
+    current = client.get(f"/static/js/app.js?v={expected}")
+    assert current.headers["cache-control"] == "public, max-age=31536000, immutable"
+    # An outdated hash, or a file fetched without one (translations), is revalidated
+    assert client.get("/static/js/app.js?v=000000000000").headers["cache-control"] == "no-cache"
+    assert client.get("/static/i18n/en.json").headers["cache-control"] == "no-cache"
+    assert client.get("/sw.js").headers["cache-control"] == "no-cache"

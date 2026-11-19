@@ -1,9 +1,12 @@
 import asyncio
 import base64
 import binascii
+import functools
+import hashlib
 import logging
 import os
 import random
+import re
 import secrets
 from contextlib import asynccontextmanager, suppress
 from datetime import date, datetime, timedelta
@@ -11,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
@@ -199,9 +202,47 @@ async def enforce_basic_auth(request: Request, call_next):
     return await call_next(request)
 
 
+# The dashboard's own files are served under content hashes: index.html
+# references them as static/…?v=<hash of the file>. A URL with the current
+# hash can be cached for good, since a changed file gets a new URL; anything
+# else (index.html itself, files fetched at runtime like the translations,
+# an outdated hash) is revalidated on every load. Without this, browsers
+# cached the files heuristically, and after an upgrade could pair the new
+# index.html with a stale app.js that renders nothing.
+ASSET_URL_RE = re.compile(r'(?P<attr>(?:href|src)=")(?P<path>static/[^"?#]+)"')
+IMMUTABLE = "public, max-age=31536000, immutable"
+
+
+@functools.cache
+def _asset_hash(path: str) -> str:
+    """Content hash of a file under static/; the image's files never change
+    while the process runs."""
+    return hashlib.sha256((STATIC_DIR / path).read_bytes()).hexdigest()[:12]
+
+
+def _hashed_index() -> str:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    return ASSET_URL_RE.sub(
+        lambda m: f'{m["attr"]}{m["path"]}?v={_asset_hash(m["path"].removeprefix("static/"))}"', html
+    )
+
+
+@app.middleware("http")
+async def cache_ui_files(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith("/static/") and response.status_code == 200:
+        version = request.query_params.get("v")
+        current = version and version == _asset_hash(path.removeprefix("/static/"))
+        response.headers["Cache-Control"] = IMMUTABLE if current else "no-cache"
+    elif path in ("/", "/sw.js", "/manifest.webmanifest"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 @app.get("/")
 async def index():
-    return FileResponse(STATIC_DIR / "index.html")
+    return HTMLResponse(_hashed_index())
 
 
 # Served from the app ROOT (not /static/): the web-app manifest's scope
