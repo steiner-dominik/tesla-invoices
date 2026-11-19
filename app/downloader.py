@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app import api, storage
+from app.accounts import DEFAULT_ID, owner_of
 from app.api import TeslaAPIClient
 from app.config import Config
 from app.privacy import redact_vin
@@ -54,9 +55,20 @@ _PLACEHOLDER_YEAR = 2000
 
 
 class InvoiceDownloader:
-    def __init__(self, config: Config, client: TeslaAPIClient):
+    def __init__(self, config: Config, client: TeslaAPIClient, account_id: str = DEFAULT_ID):
         self.config = config
         self.client = client
+        self.account_id = account_id
+
+    def _owned_elsewhere(self, existing: dict) -> bool:
+        """The first account to save an invoice keeps it: a car visible to two
+        accounts must not flip its invoices' account (or vehicle name) between
+        syncs. Untouched sidecars still count as the default account's."""
+        return bool(existing) and owner_of(existing) != self.account_id
+
+    def _ownership(self, existing: dict) -> dict:
+        # Only new sidecars are stamped; old ones stay the default's by owner_of().
+        return {} if existing else {"account": self.account_id}
 
     @staticmethod
     def _month_set(months: Iterable[datetime] | None) -> set[tuple[int, int]] | None:
@@ -233,9 +245,13 @@ class InvoiceDownloader:
         if legacy_pdf != local_pdf_path:
             self._adopt_legacy(legacy_pdf, local_pdf_path)
             self._adopt_legacy(legacy_pdf.with_suffix(".json"), local_json_path)
+        existing_meta = storage.read_json(local_json_path)
+        if self._owned_elsewhere(existing_meta):
+            return
 
         # Save session data even if the PDF exists, to keep analytics populated
         metadata = {
+            **self._ownership(existing_meta),
             "type": "charging",
             "meta_version": METADATA_VERSION,
             "vin": vin or "",
@@ -468,6 +484,8 @@ class InvoiceDownloader:
         credit_suffix = "_creditnote" if is_credit_note else ""
         stem = f"tesla_subscription_invoice_{vin}_{invoice_dt.strftime('%Y-%m-%d')}{credit_suffix}"
         local_pdf_path, local_json_path, existing_meta = self._subscription_paths(stem, invoice_id)
+        if self._owned_elsewhere(existing_meta):
+            return
 
         # Reuse the stored cost only if it was extracted by the current
         # logic; otherwise re-parse the PDF (stale/garbage values). A stored
@@ -509,6 +527,7 @@ class InvoiceDownloader:
                     logger.warning(f"No invoice date found in {redact_vin(local_pdf_path.name)}")
 
         metadata = {
+            **self._ownership(existing_meta),
             "type": "subscription",
             "meta_version": METADATA_VERSION,
             "vin": vin,

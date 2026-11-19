@@ -654,3 +654,72 @@ def test_charging_invoices_from_other_networks_are_downloaded(tmp_path):
     assert meta["site_name"] == "IONITY Obidos"
     assert meta["total_cost"] == 11.43
     assert meta["vin"] == ""
+
+
+class TestAccountOwnership:
+    """Several accounts share one invoice folder; the first to save an invoice keeps it."""
+
+    @staticmethod
+    def _charging_client(fetched):
+        class DummyClient:
+            def get_vehicles(self):
+                return {"VIN123": {"display_name": "Her name for it"}}
+
+            def get_charging_history(self, vin):
+                return [
+                    {
+                        "vin": "VIN123",
+                        "unlatchDateTime": "2024-02-21T10:00:00",
+                        "countryCode": "PT",
+                        "invoices": [{"contentId": "c1", "fileName": "one.pdf"}],
+                    }
+                ]
+
+            def get_charging_invoice(self, invoice_id, vin):
+                fetched.append(invoice_id)
+                return b"%PDF-1.4"
+
+        return DummyClient()
+
+    def _sidecar(self, config):
+        return config.invoice_path / "tesla_charging_invoice_VIN123_2024-02-21_PT_one.json"
+
+    def test_new_sidecars_record_their_account(self, tmp_path, monkeypatch):
+        config = make_config(tmp_path, enable_subscription_invoice=False)
+        InvoiceDownloader(config, self._charging_client([]), "a1").download_invoices()
+        assert json.loads(self._sidecar(config).read_text())["account"] == "a1"
+
+        sub_config = make_config(tmp_path / "s")
+        monkeypatch.setattr(InvoiceDownloader, "extract_cost_from_pdf", staticmethod(lambda _b: (1.0, "EUR")))
+        invoice = {"InvoiceDate": "2026-05-01T00:00:00", "InvoiceId": "INV-1", "InvoiceFileName": "i.pdf"}
+        InvoiceDownloader(sub_config, _subscription_client([invoice]), "a1").download_invoices()
+        meta = json.loads((sub_config.invoice_path / "tesla_subscription_invoice_VIN123_2026-05-01.json").read_text())
+        assert meta["account"] == "a1"
+
+    def test_another_accounts_invoice_is_left_alone(self, tmp_path):
+        config = make_config(tmp_path, enable_subscription_invoice=False)
+        config.invoice_path.mkdir(parents=True)
+        sidecar = self._sidecar(config)
+        sidecar.write_text(json.dumps({"account": "a1", "vehicle_name": "His name for it"}))
+        before = sidecar.read_bytes()
+        fetched = []
+
+        InvoiceDownloader(config, self._charging_client(fetched), "a2").download_invoices()
+
+        assert sidecar.read_bytes() == before
+        assert fetched == []
+
+    def test_pre_multi_account_sidecars_stay_with_the_default_account(self, tmp_path):
+        config = make_config(tmp_path, enable_subscription_invoice=False)
+        config.invoice_path.mkdir(parents=True)
+        sidecar = self._sidecar(config)
+        sidecar.write_text(json.dumps({"vehicle_name": "Old"}))
+        sidecar.with_suffix(".pdf").write_bytes(b"%PDF-1.4")
+
+        InvoiceDownloader(config, self._charging_client([]), "a2").download_invoices()
+        assert json.loads(sidecar.read_text()) == {"vehicle_name": "Old"}
+
+        InvoiceDownloader(config, self._charging_client([])).download_invoices()
+        meta = json.loads(sidecar.read_text())
+        assert meta["vehicle_name"] == "Her name for it"
+        assert "account" not in meta  # still the default's by owner_of(), never stamped
