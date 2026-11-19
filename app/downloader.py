@@ -193,12 +193,22 @@ class InvoiceDownloader:
         self, session: dict, invoice: dict, session_dt: datetime, vin: str, vehicle_name: str
     ) -> None:
         invoice_id = invoice["contentId"]
-        filename = invoice["fileName"]
+        # Every invoice is stored as .pdf, whatever Tesla named it: some are
+        # PDFs named INVOICESTATUS….XML, and old ones have no name at all.
+        # The rest of the app lists *.pdf.
+        tesla_name = invoice.get("fileName") or ""
+        filename = Path(tesla_name).with_suffix(".pdf").name if tesla_name else f"{invoice_id}.pdf"
         country_code = session.get("countryCode", "UN")
 
         base_name = f"tesla_charging_invoice_{vin}_{session_dt.strftime('%Y-%m-%d')}_{country_code}_{filename}"
         local_pdf_path = self.config.invoice_path / base_name
         local_json_path = local_pdf_path.with_suffix(".json")
+        # Files stored under Tesla's own name before (no .pdf, or no name at
+        # all, which left a file ending in "_") move to the new name.
+        legacy_pdf = local_pdf_path.with_name(base_name.removesuffix(filename) + tesla_name)
+        if legacy_pdf != local_pdf_path:
+            self._adopt_legacy(legacy_pdf, local_pdf_path)
+            self._adopt_legacy(legacy_pdf.with_suffix(".json"), local_json_path)
 
         # Save session data even if the PDF exists, to keep analytics populated
         metadata = {
@@ -224,6 +234,16 @@ class InvoiceDownloader:
         content = self.client.get_charging_invoice(invoice_id, vin)
         storage.write_bytes_atomic(local_pdf_path, content)
         logger.debug(f"Saved '{redact_vin(local_pdf_path)}'")
+
+    @staticmethod
+    def _adopt_legacy(old: Path, new: Path) -> None:
+        if old == new or not old.is_file():
+            return
+        if new.exists():
+            old.unlink()
+        else:
+            old.replace(new)
+        logger.info(f"Moved {redact_vin(old.name)} to {redact_vin(new.name)}")
 
     @staticmethod
     def _charging_fee_metadata(session: dict) -> dict:

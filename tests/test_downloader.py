@@ -504,3 +504,69 @@ class TestExtractSessionsRobustness:
         assert InvoiceDownloader._extract_charging_sessions({"data": {"me": None}}) == []
         assert InvoiceDownloader._extract_charging_sessions({"data": {"me": "Not Found"}}) == []
         assert InvoiceDownloader._extract_charging_sessions({"data": {"me": {"charging": 42}}}) == []
+
+
+def test_charging_invoice_named_xml_is_stored_as_pdf(tmp_path):
+    # Tesla names some old charging invoices INVOICESTATUS….XML; they are PDFs.
+    config = make_config(tmp_path, enable_subscription_invoice=False)
+
+    class DummyClient:
+        def get_vehicles(self):
+            return {"VIN123": {"display_name": "My Tesla"}}
+
+        def get_charging_history(self, vin):
+            return [
+                {
+                    "vin": "VIN123",
+                    "unlatchDateTime": "2022-06-11T10:00:00",
+                    "countryCode": "PT",
+                    "invoices": [{"contentId": "c1", "fileName": "INVOICESTATUS2036355778037.XML"}],
+                }
+            ]
+
+        def get_charging_invoice(self, invoice_id, vin):
+            return b"%PDF-1.4"
+
+    InvoiceDownloader(config, DummyClient()).download_invoices()
+
+    pdf = config.invoice_path / "tesla_charging_invoice_VIN123_2022-06-11_PT_INVOICESTATUS2036355778037.pdf"
+    assert pdf.read_bytes() == b"%PDF-1.4"
+    assert json.loads(pdf.with_suffix(".json").read_text())["filename"] == pdf.name
+
+
+def test_nameless_charging_invoice_is_stored_as_pdf_and_old_files_move(tmp_path):
+    # Old sessions list their invoice with an empty fileName; it used to be
+    # stored as a file ending in "_" (no .pdf), with a sidecar "…_.json".
+    config = make_config(tmp_path, enable_subscription_invoice=False)
+    config.invoice_path.mkdir(parents=True)
+    old = config.invoice_path / "tesla_charging_invoice_VIN123_2021-06-08_PT_"
+    old.write_bytes(b"%PDF-old")
+    (config.invoice_path / "tesla_charging_invoice_VIN123_2021-06-08_PT_.json").write_text('{"email_sent": "x"}')
+    fetched = []
+
+    class DummyClient:
+        def get_vehicles(self):
+            return {"VIN123": {"display_name": "My Tesla"}}
+
+        def get_charging_history(self, vin):
+            return [
+                {
+                    "vin": "VIN123",
+                    "unlatchDateTime": "2021-06-08T10:00:00",
+                    "countryCode": "PT",
+                    "invoices": [{"contentId": "abc-123", "fileName": ""}],
+                }
+            ]
+
+        def get_charging_invoice(self, invoice_id, vin):
+            fetched.append(invoice_id)
+            return b"%PDF-new"
+
+    InvoiceDownloader(config, DummyClient()).download_invoices()
+
+    pdf = config.invoice_path / "tesla_charging_invoice_VIN123_2021-06-08_PT_abc-123.pdf"
+    assert pdf.read_bytes() == b"%PDF-old"  # moved, not downloaded again
+    assert fetched == []
+    meta = json.loads(pdf.with_suffix(".json").read_text())
+    assert meta["email_sent"] == "x" and meta["filename"] == pdf.name  # the sidecar moved with it
+    assert sorted(p.name for p in config.invoice_path.iterdir()) == [pdf.with_suffix(".json").name, pdf.name]
