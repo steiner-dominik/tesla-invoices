@@ -618,3 +618,16 @@ def test_dashboard_assets_are_served_under_content_hashes(client):
     assert client.get("/static/js/app.js?v=000000000000").headers["cache-control"] == "no-cache"
     assert client.get("/static/i18n/en.json").headers["cache-control"] == "no-cache"
     assert client.get("/sw.js").headers["cache-control"] == "no-cache"
+
+
+def test_api_json_is_compressed_but_pdfs_are_not(client):
+    import json as jsonlib
+
+    for i in range(30):
+        meta = {"type": "charging", "date": f"2026-07-{i % 28 + 1:02d}T10:00:00", "filename": f"{i}.pdf"}
+        (server.config.invoice_path / f"{i}.json").write_text(jsonlib.dumps(meta))
+    (server.config.invoice_path / "big.pdf").write_bytes(b"%PDF-1.4" + b"x" * 5000)
+    gzip = {"Accept-Encoding": "gzip"}
+
+    assert client.get("/api/analytics", headers=gzip).headers.get("content-encoding") == "gzip"
+    assert "content-encoding" not in client.get("/api/download/big.pdf", headers=gzip).headers

@@ -153,9 +153,22 @@ function monthKey(dateStr) {
     return key >= '2012' ? key : '';
 }
 
+// Intl formatters are costly to build and the table formats every row,
+// so each (kind, language, options) combination is built once.
+const formatters = new Map();
+function formatter(Kind, locale, options) {
+    const key = Kind.name + '|' + locale + '|' + JSON.stringify(options);
+    if (!formatters.has(key)) formatters.set(key, new Kind(locale, options));
+    return formatters.get(key);
+}
+
+function fmtNumber(value, options) {
+    return formatter(Intl.NumberFormat, lang, options).format(value || 0);
+}
+
 // Numbers and month labels follow the UI language (de: 1.234,56)
 function fmtMoney(value) {
-    return (value || 0).toLocaleString(lang, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return fmtNumber(value, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 // Per-line effective price per kWh (own currency); null when not applicable.
@@ -181,7 +194,7 @@ function fmtTimestamp(value) {
     const pad = (n) => String(n).padStart(2, '0');
     let tz = '';
     try {
-        tz = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' })
+        tz = formatter(Intl.DateTimeFormat, undefined, { timeZoneName: 'short' })
             .formatToParts(d)
             .find((p) => p.type === 'timeZoneName').value;
     } catch (e) { /* very old browsers: omit the zone */ }
@@ -267,7 +280,7 @@ function renderCards(data) {
     }
 
     document.getElementById('stat-count').textContent = data.length;
-    document.getElementById('stat-kwh').textContent = kwh.toLocaleString(lang, { maximumFractionDigits: 1 }) + ' kWh';
+    document.getElementById('stat-kwh').textContent = fmtNumber(kwh, { maximumFractionDigits: 1 }) + ' kWh';
     document.getElementById('stat-cost').textContent = fmtMoney(costPrimary) + ' ' + primary;
 
     const others = [...currencies].filter((c) => c && c !== primary);
@@ -327,13 +340,14 @@ function niceMax(value) {
 }
 
 function fmtAxis(value) {
-    if (value >= 1000) return (value / 1000).toLocaleString(lang, { maximumFractionDigits: 1 }) + 'k';
-    return value.toLocaleString(lang, { maximumFractionDigits: value < 10 ? 1 : 0 });
+    if (value >= 1000) return fmtNumber(value / 1000, { maximumFractionDigits: 1 }) + 'k';
+    return fmtNumber(value, { maximumFractionDigits: value < 10 ? 1 : 0 });
 }
 
 function monthLabel(key) {
     const [y, m] = key.split('-');
-    return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString(lang, { month: 'short', year: '2-digit' });
+    return formatter(Intl.DateTimeFormat, lang, { month: 'short', year: '2-digit' })
+        .format(new Date(Number(y), Number(m) - 1, 1));
 }
 
 function renderBarChart(containerId, captionId, buckets, color, unit) {
@@ -350,7 +364,7 @@ function renderBarChart(containerId, captionId, buckets, color, unit) {
     }
 
     const total = buckets.reduce((s, b) => s + b.value, 0);
-    const fmtVal = (v) => v.toLocaleString(lang, { maximumFractionDigits: 2 }) + ' ' + unit;
+    const fmtVal = (v) => fmtNumber(v, { maximumFractionDigits: 2 }) + ' ' + unit;
     const defaultCaption = () => { caption.innerHTML = t('chart_total') + ' <b>' + fmtVal(total) + '</b>'; };
     defaultCaption();
 
@@ -822,10 +836,11 @@ function renderSyncState() {
 
 // ---------- data loading ----------
 
-async function loadData() {
+// ``pending``: an /api/analytics request already under way (startup).
+async function loadData(pending) {
     const tbody = document.getElementById('invoice-table-body');
     try {
-        const response = await fetch(API_ANALYTICS);
+        const response = await (pending || fetch(API_ANALYTICS));
         if (!response.ok) throw new Error('HTTP ' + response.status);
         const result = await response.json();
         summary = result.summary || {};
@@ -1089,8 +1104,11 @@ document.getElementById('export-zip-btn').addEventListener('click', (e) =>
 
 // ---------- startup ----------
 
-// Translations first, so the initial render is never half-translated.
-initI18n().then(loadData);
+// The invoice data loads while the translations do; rendering waits for
+// both, so the initial render is never half-translated.
+const initialAnalytics = fetch(API_ANALYTICS);
+initialAnalytics.catch(() => {}); // loadData reports a failure, once
+initI18n().then(() => loadData(initialAnalytics));
 // Makes the app installable as a PWA (standalone window). Relative URL, so
 // the worker registers under the ingress prefix too; failure is fine —
 // the dashboard works identically without it.
