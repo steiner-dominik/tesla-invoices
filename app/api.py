@@ -15,6 +15,7 @@ from curl_cffi import requests as curl_requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from app.accounts import Account
 from app.auth import REDIRECT_URI
 from app.config import Config
 
@@ -211,8 +212,18 @@ class TLS13Adapter(HTTPAdapter):
 
 
 class TokenManager:
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, account: Account | None = None):
         self.config = config
+        # Without an account: the single account configured in Config (the
+        # app's only account before multi-account support).
+        self.account = account or Account(
+            "default",
+            "",
+            config.refresh_token_path,
+            config.access_token_path,
+            config.env_refresh_token,
+            config.env_access_token,
+        )
         self.access_token: str = ""
         self.refresh_token: str = ""
         # Access-token-only mode warns once, not on every request of a sync.
@@ -261,11 +272,11 @@ class TokenManager:
 
     def _determine_best_token(self, token_type: str, required: bool = True) -> str:
         if token_type == "access":
-            path = self.config.access_token_path
-            env_token = self.config.env_access_token
+            path = self.account.access_token_path
+            env_token = self.account.env_access_token
         else:
-            path = self.config.refresh_token_path
-            env_token = self.config.env_refresh_token
+            path = self.account.refresh_token_path
+            env_token = self.account.env_refresh_token
 
         file_token = path.read_text().strip() if path.exists() else ""
 
@@ -299,8 +310,8 @@ class TokenManager:
         """Read-only check for whether any usable token is configured, for the
         UI's setup state. Unlike load_tokens() it never raises or persists."""
         pairs = (
-            (self.config.refresh_token_path, self.config.env_refresh_token),
-            (self.config.access_token_path, self.config.env_access_token),
+            (self.account.refresh_token_path, self.account.env_refresh_token),
+            (self.account.access_token_path, self.account.env_access_token),
         )
         for path, env_token in pairs:
             if env_token.strip():
@@ -311,6 +322,26 @@ class TokenManager:
             except OSError:
                 pass
         return False
+
+    def user_id(self) -> str:
+        """The Tesla user id (``sub``) the configured tokens belong to, or ""
+        when there is none. Read-only, like has_token()."""
+        candidates = (
+            self.access_token,
+            self.refresh_token,
+            self.account.env_access_token,
+            self.account.env_refresh_token,
+        )
+        for path in (self.account.access_token_path, self.account.refresh_token_path):
+            try:
+                candidates += (path.read_text().strip(),) if path.exists() else ()
+            except OSError:
+                pass
+        for token in candidates:
+            sub = self.jwt_decode(token).get("sub")
+            if sub:
+                return str(sub)
+        return ""
 
     def load_tokens(self) -> None:
         # A refresh token is recommended (access tokens are then obtained and
@@ -405,11 +436,11 @@ class TokenManager:
             )
         with self._lock:
             self.refresh_token = refresh_token
-            self._persist_token(self.config.refresh_token_path, refresh_token)
+            self._persist_token(self.account.refresh_token_path, refresh_token)
             access_token = data.get("access_token")
             if access_token:
                 self.access_token = access_token
-                self._persist_token(self.config.access_token_path, access_token)
+                self._persist_token(self.account.access_token_path, access_token)
             self._expiry_warned = False
         logger.info("Tesla login complete; refresh token stored")
 
@@ -432,7 +463,7 @@ class TokenManager:
             # refresh_access_token only persists a *rotated* refresh token;
             # when Tesla keeps the pasted one, persist it here.
             if self.refresh_token == refresh_token:
-                self._persist_token(self.config.refresh_token_path, refresh_token)
+                self._persist_token(self.account.refresh_token_path, refresh_token)
         logger.info("Manually supplied refresh token verified and stored")
 
     def refresh_access_token(self) -> None:
@@ -454,13 +485,13 @@ class TokenManager:
                 raise TeslaAuthError(f"Renewing the Tesla access token failed: {e}") from e
 
             self.access_token = data["access_token"]
-            self._persist_token(self.config.access_token_path, self.access_token)
+            self._persist_token(self.account.access_token_path, self.access_token)
             # Tesla may rotate the refresh token; losing the new one would
             # permanently break auth once the old one is invalidated.
             new_refresh_token = data.get("refresh_token")
             if new_refresh_token and new_refresh_token != self.refresh_token:
                 self.refresh_token = new_refresh_token
-                self._persist_token(self.config.refresh_token_path, new_refresh_token)
+                self._persist_token(self.account.refresh_token_path, new_refresh_token)
                 logger.info("Tesla issued a new refresh token; stored it for future syncs")
         logger.info("Tesla access token renewed")
 
