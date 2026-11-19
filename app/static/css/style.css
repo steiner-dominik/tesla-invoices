@@ -169,8 +169,13 @@ main { max-width: 78rem; margin: 0 auto; padding: 1.5rem; }
     color: var(--text);
 }
 .account-state { font-size: 0.85rem; color: var(--muted); }
-#account-status.connected { color: var(--green); }
-#account-status.disconnected { color: var(--amber); }
+.account-list { list-style: none; padding: 0; margin: 0 0 0.75rem; }
+.account-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border); }
+.account-list .account-name { font-weight: 600; }
+.account-list .account-state { flex: 1 1 10rem; }
+.account-list .connected { color: var(--green); }
+.account-list .disconnected { color: var(--amber); }
+.auth-name { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 0.75rem; font-size: 0.85rem; }
 .tabs {
     display: flex;
     gap: 0.25rem;
