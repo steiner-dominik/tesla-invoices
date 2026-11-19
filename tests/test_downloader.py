@@ -611,3 +611,46 @@ class TestInvoiceDateFromPdf:
         sidecar = config.invoice_path / "tesla_subscription_invoice_VIN123_0001-01-01.json"
         assert json.loads(sidecar.read_text())["date"] == "2023-07-06T00:00:00"
         assert reads == [1]
+
+
+def test_charging_invoices_from_other_networks_are_downloaded(tmp_path):
+    # IONITY sessions billed by Tesla carry no VIN: the per-vehicle history
+    # never returns them, only the account-wide one does.
+    config = make_config(tmp_path, enable_subscription_invoice=False)
+    own = {
+        "vin": "VIN123",
+        "unlatchDateTime": "2026-09-01T10:00:00",
+        "countryCode": "PT",
+        "invoices": [{"contentId": "own", "fileName": "own.pdf"}],
+    }
+    ionity = {
+        "vin": None,
+        "operator": "IONITY",
+        "programType": "EXTERNAL",
+        "siteLocationName": "IONITY Obidos",
+        "unlatchDateTime": "2026-09-08T10:00:00",
+        "countryCode": "PT",
+        "fees": [{"feeType": "CHARGING", "totalDue": 11.43, "currencyCode": "EUR", "uom": "kWh", "usageBase": 16.592}],
+        "invoices": [{"contentId": "ion", "fileName": "4036MSP0000000419PT-PT.pdf"}],
+    }
+    fetched = []
+
+    class DummyClient:
+        def get_vehicles(self):
+            return {"VIN123": {"display_name": "My Tesla"}}
+
+        def get_charging_history(self, vin):
+            return [own] if vin else [own, ionity]
+
+        def get_charging_invoice(self, invoice_id, vin):
+            fetched.append(invoice_id)
+            return b"%PDF-1.4"
+
+    InvoiceDownloader(config, DummyClient()).download_invoices()
+
+    assert sorted(fetched) == ["ion", "own"]  # the own session is not fetched twice
+    pdf = config.invoice_path / "tesla_charging_invoice_IONITY_2026-09-08_PT_4036MSP0000000419PT-PT.pdf"
+    meta = json.loads(pdf.with_suffix(".json").read_text())
+    assert meta["site_name"] == "IONITY Obidos"
+    assert meta["total_cost"] == 11.43
+    assert meta["vin"] == ""

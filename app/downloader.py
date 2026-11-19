@@ -126,6 +126,15 @@ class InvoiceDownloader:
                 sub_data = self.client.get_subscription_invoices(vin)
                 failures += self._save_subscription_invoices(sub_data.get("data", []), month_set, vin, display_name)
 
+        if self.config.enable_charging_invoice:
+            # Sessions on other networks (e.g. IONITY, billed by Tesla) carry
+            # no VIN, so the per-vehicle queries above never return them.
+            logger.info("Checking for charging invoices from other networks")
+            # With vin=None, _save_charging_invoices skips every session that
+            # has a VIN: those were saved per vehicle above.
+            all_sessions = self._extract_charging_sessions(self.client.get_charging_history(None))
+            failures += self._save_charging_invoices(all_sessions, month_set, None, "")
+
         if failures:
             logger.warning(
                 f"Invoice sync finished, but {failures} download(s) failed; they will be retried on the next sync"
@@ -159,7 +168,7 @@ class InvoiceDownloader:
         self,
         charging_sessions: list[dict],
         months: set[tuple[int, int]] | None,
-        vin: str,
+        vin: str | None,
         vehicle_name: str,
     ) -> int:
         """Returns the number of invoices that failed; one bad session or
@@ -202,7 +211,7 @@ class InvoiceDownloader:
         return failures
 
     def _save_one_charging_invoice(
-        self, session: dict, invoice: dict, session_dt: datetime, vin: str, vehicle_name: str
+        self, session: dict, invoice: dict, session_dt: datetime, vin: str | None, vehicle_name: str
     ) -> None:
         invoice_id = invoice["contentId"]
         # Every invoice is stored as .pdf, whatever Tesla named it: some are
@@ -212,7 +221,10 @@ class InvoiceDownloader:
         filename = Path(tesla_name).with_suffix(".pdf").name if tesla_name else f"{invoice_id}.pdf"
         country_code = session.get("countryCode", "UN")
 
-        base_name = f"tesla_charging_invoice_{vin}_{session_dt.strftime('%Y-%m-%d')}_{country_code}_{filename}"
+        # Sessions on other networks have no vehicle; their operator takes
+        # the VIN's place in the file name (e.g. ..._IONITY_2026-09-08_...).
+        owner = vin or re.sub(r"[^A-Z0-9]", "", (session.get("operator") or "").upper()) or "EXTERNAL"
+        base_name = f"tesla_charging_invoice_{owner}_{session_dt.strftime('%Y-%m-%d')}_{country_code}_{filename}"
         local_pdf_path = self.config.invoice_path / base_name
         local_json_path = local_pdf_path.with_suffix(".json")
         # Files stored under Tesla's own name before (no .pdf, or no name at
@@ -226,7 +238,7 @@ class InvoiceDownloader:
         metadata = {
             "type": "charging",
             "meta_version": METADATA_VERSION,
-            "vin": vin,
+            "vin": vin or "",
             "vehicle_name": vehicle_name,
             "date": session_dt.isoformat(),
             "filename": base_name,

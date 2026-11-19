@@ -483,15 +483,15 @@ class TeslaAPIClient:
     def ensure_authenticated(self):
         self.token_manager.refresh_access_token_if_needed()
 
-    def _locale_params(self, vin: str) -> dict[str, str]:
-        return {
+    def _locale_params(self, vin: str | None) -> dict[str, str]:
+        params = {
             "deviceLanguage": "en",
             # Fixed to US: the Tesla app sends US regardless of the account's
             # actual country, and the Akamai GraphQL gateway rejects others.
             "deviceCountry": "US",
             "ttpLocale": "en_US",
-            "vin": vin,
         }
+        return {**params, "vin": vin} if vin else params
 
     def base_req(self, url: str, method="get", json_data=None, params=None, extra_headers=None) -> Any:
         self.ensure_authenticated()
@@ -562,8 +562,11 @@ class TeslaAPIClient:
                 vehicles[product["vin"]] = product
         return vehicles
 
-    def get_charging_history(self, vin: str) -> list[dict[str, Any]]:
+    def get_charging_history(self, vin: str | None) -> list[dict[str, Any]]:
         """Fetch all charging history sessions for a VIN, following pagination.
+        ``vin=None`` fetches the account-wide history, which is the only place
+        sessions on other networks (e.g. IONITY, billed by Tesla) appear:
+        they carry no VIN.
 
         Tesla replaced the REST charging history endpoint with a paginated
         GraphQL API (observed 2026-07). Intentionally changed; the old endpoint
@@ -593,7 +596,7 @@ class TeslaAPIClient:
                     # account-wide history (the vin in the URL params is not
                     # enough), which would duplicate every invoice once per
                     # vehicle on multi-vehicle accounts.
-                    "vin": vin,
+                    **({"vin": vin} if vin else {}),
                 },
                 "operationName": "getChargingHistoryV2",
             }
@@ -663,7 +666,7 @@ class TeslaAPIClient:
             raise TeslaAPIError(f"Response for {what} is not a PDF (missing %PDF signature)")
         return content
 
-    def get_charging_invoice(self, invoice_id: str, vin: str) -> bytes:
+    def get_charging_invoice(self, invoice_id: str, vin: str | None) -> bytes:
         url = f"https://ownership.tesla.com/mobile-app/charging/invoice/{invoice_id}"
         response = self.base_req(url, params=self._locale_params(vin))
         return self._expect_pdf(response, f"charging invoice {invoice_id}")
