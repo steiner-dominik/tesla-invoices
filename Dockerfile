@@ -3,7 +3,7 @@
 # Dependabot sees and bumps the pinned uv version.
 FROM ghcr.io/astral-sh/uv:0.13.7 AS uv
 
-FROM python:3.14-alpine
+FROM python:3.15-alpine
 
 # tzdata makes time zones work: TZ env var (standalone) and the Home
 # Assistant time zone (fetched from the Supervisor at startup).
