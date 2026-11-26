@@ -12,7 +12,7 @@ dependencies = [
     "urllib3==2.8.0",
     # Auth only: Tesla rejects tokens refreshed with a non-browser TLS fingerprint
     "curl_cffi==0.17.0",
-    "fastapi==0.162.0",
+    "fastapi==0.164.0",
     "uvicorn==0.54.0",
     "pypdf==6.21.4",
 ]
