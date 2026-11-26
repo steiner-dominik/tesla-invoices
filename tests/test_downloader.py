@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import datetime
 
 import pytest
@@ -723,3 +724,32 @@ class TestAccountOwnership:
         meta = json.loads(sidecar.read_text())
         assert meta["vehicle_name"] == "Her name for it"
         assert "account" not in meta  # still the default's by owner_of(), never stamped
+
+
+def test_adopt_legacy_never_deletes_the_file_it_keeps(tmp_path):
+    # Two names for one file (here a hard link; on a case-insensitive
+    # filesystem "X.PDF" and "X.pdf"): the old name must not be unlinked
+    # as a duplicate, or the invoice is lost and re-downloaded every sync.
+    new = tmp_path / "invoice.pdf"
+    new.write_bytes(b"%PDF-1.4")
+    old = tmp_path / "invoice_legacy"
+    os.link(new, old)
+
+    InvoiceDownloader._adopt_legacy(old, new)
+
+    assert old.exists()  # never unlinked: it is not a separate copy
+    assert new.read_bytes() == b"%PDF-1.4"
+
+
+def test_adopt_legacy_fixes_the_case_on_case_insensitive_filesystems(tmp_path):
+    old = tmp_path / "invoice.PDF"
+    old.write_bytes(b"%PDF-1.4")
+    new = tmp_path / "invoice.pdf"
+    if not new.exists():
+        pytest.skip("case-sensitive filesystem")
+
+    InvoiceDownloader._adopt_legacy(old, new)
+    InvoiceDownloader._adopt_legacy(old, new)  # the next sync: nothing to do
+
+    assert os.listdir(tmp_path) == ["invoice.pdf"]
+    assert new.read_bytes() == b"%PDF-1.4"

@@ -176,12 +176,12 @@ The dashboard is a thin client over a small REST API you can use directly:
 | `POST /api/auth/login/complete` | Finish the login (JSON body `{"callback_url": "…"}`) and store the token |
 | `POST /api/auth/token` | Store a pasted refresh token (JSON body `{"refresh_token": "…"}`), verified with Tesla first |
 | `PATCH /api/accounts/{id}` / `DELETE /api/accounts/{id}` | Rename (`{"name": "…"}`) or remove an added account; its invoices stay |
+| `GET /health` | Health check (used by the HA watchdog and Docker) |
 
 > 👥 **Accounts:** the login and token endpoints take an optional `"account": "<id>"`
 > (reconnect that account) or `"name": "…"` (add a new one); neither means the main
 > account. `GET /api/analytics` lists them in `summary.accounts`, and every invoice
 > records the `account` it came from (none = the main account).
-| `GET /health` | Health check (used by the HA watchdog and Docker) |
 
 > 🔐 **CSRF protection:** every `POST`/`DELETE` request — and the two
 > expensive export `GET`s — must carry an `X-Requested-With` header (any

@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 from collections.abc import Iterable
 from datetime import datetime
@@ -279,10 +280,21 @@ class InvoiceDownloader:
     def _adopt_legacy(old: Path, new: Path) -> None:
         if old == new or not old.is_file():
             return
-        if new.exists():
-            old.unlink()
-        else:
+        if not new.exists():
             old.replace(new)
+        elif old.samefile(new):
+            # Names that differ only in case (Tesla's "….PDF") are one and the
+            # same file on a case-insensitive filesystem (e.g. a Docker Desktop
+            # bind mount on macOS/Windows): deleting "old" would delete the
+            # invoice. Correct the case once, via a temporary name, since the
+            # rest of the app lists *.pdf.
+            if new.name in os.listdir(new.parent):
+                return
+            temp = new.with_name(new.name + ".renaming")
+            old.replace(temp)
+            temp.replace(new)
+        else:
+            old.unlink()
         logger.info(f"Moved {redact_vin(old.name)} to {redact_vin(new.name)}")
 
     @staticmethod
