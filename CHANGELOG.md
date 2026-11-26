@@ -1,4 +1,38 @@
 <!-- https://developers.home-assistant.io/docs/apps/presentation#keeping-a-changelog -->
+## 2026.11.26.1
+
+- **Several Tesla accounts in one instance** (contributed by Pedro Melo):
+  add a partner's or a company account under *Maintenance → Add another
+  Tesla account*. Every connected account syncs into the same dashboard,
+  and an account filter appears as soon as there is more than one. Accounts
+  can be reconnected, renamed and removed (their invoices stay). Existing
+  installs keep working unchanged as a single-account setup; extra accounts
+  store their tokens in `secrets/accounts/` next to `refresh_token.txt`, so
+  for Docker mount the whole `secrets` directory, not just the file.
+- **Charging invoices from other networks** (e.g. IONITY sessions billed by
+  Tesla) are now downloaded too: they carry no VIN, so the per-vehicle
+  history never listed them.
+- **Faster dashboard**: API responses are gzip-compressed, number and date
+  formatters are built once instead of per row, and the invoice data loads
+  in parallel with the translations.
+- **No more stale dashboard files after an upgrade**: scripts and styles are
+  served under content hashes, so browsers can cache them for good and
+  always pick up a changed file.
+- Runtime moves to **Python 3.15**; FastAPI 0.164 and updated build tooling.
+
+Fixes:
+
+- Every charging invoice is stored as a `.pdf`, whatever Tesla names it:
+  some old invoices are PDFs named `INVOICESTATUS….XML` (and were rejected
+  because of their `application/xml` content type), others had no name at
+  all. Files stored under the old names are renamed in place.
+- Subscription invoices that Tesla dates `0001-01-01` get their real date
+  from the PDF; such dates also made the dashboard draw ~24,000 months and
+  freeze for seconds.
+- On case-insensitive filesystems (e.g. Docker Desktop bind mounts on
+  macOS/Windows), the rename above no longer deletes an invoice whose name
+  differs only in case (`….PDF`).
+
 ## 2026.11.06.1
 
 - **Security updates for all dependencies**, closing 39 known
