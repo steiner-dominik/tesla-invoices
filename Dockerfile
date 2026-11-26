@@ -1,7 +1,7 @@
 # uv only exports the lockfile during the build; it never ends up in the
 # final image. A named stage (rather than an inline --mount image) so
 # Dependabot sees and bumps the pinned uv version.
-FROM ghcr.io/astral-sh/uv:0.13.7 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.9 AS uv
 
 FROM python:3.14-alpine
 
